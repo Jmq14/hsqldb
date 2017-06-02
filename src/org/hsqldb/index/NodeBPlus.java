@@ -231,12 +231,12 @@ public class NodeBPlus implements CachedObject {
     public NodeBPlus set(PersistentStore store, NodeBPlus key, NodeBPlus pointer, int pos) {
         if (isLeaf) {
             // leaf node
-            ArrayUtil.toAdjustedArray(keys, key, pos, 1);
+            keys = (NodeBPlus[])ArrayUtil.toAdjustedArray(keys, key, pos, 1);
         }
         else {
             // interior node
-            ArrayUtil.toAdjustedArray(keys, key, pos, 1);
-            ArrayUtil.toAdjustedArray(pointer, pointer, pos+1, 1);
+            keys = (NodeBPlus[])ArrayUtil.toAdjustedArray(keys, key, pos, 1);
+            pointers = (NodeBPlus[])ArrayUtil.toAdjustedArray(pointer, pointer, pos+1, 1);
         }
         return this;
     }
@@ -333,7 +333,7 @@ public class NodeBPlus implements CachedObject {
     }
 
     public void addKeys(NodeBPlus key) {
-        ArrayUtil.toAdjustedArray(this.keys, key, this.keys.length, 1);
+        keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, key, this.keys.length, 1);
     }
 
     public void setPointers(NodeBPlus[] pointers) {
@@ -346,7 +346,7 @@ public class NodeBPlus implements CachedObject {
     }
 
     public void addPointers(NodeBPlus pointer){
-        ArrayUtil.toAdjustedArray(this.pointers, pointer, this.pointers.length, 1);
+        pointers = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.pointers, pointer, this.pointers.length, 1);
     }
 
     public void setNextPage(NodeBPlus n) {

@@ -578,26 +578,26 @@ public class IndexBPlus implements Index {
      * Removes all links between memory nodes
      */
     public void unlinkNodes(NodeBPlus primaryRoot) {
-
-        writeLock.lock();
-
-        try {
-            NodeBPlus x = primaryRoot;
-            NodeBPlus l = x;
-
-            while (l != null) {
-                x = l;
-                l = x.getLeft(null);
-            }
-
-            while (x != null) {
-                NodeBPlus n = nextUnlink(x);
-
-                x = n;
-            }
-        } finally {
-            writeLock.unlock();
-        }
+//
+//        writeLock.lock();
+//
+//        try {
+//            NodeBPlus x = primaryRoot;
+//            NodeBPlus l = x;
+//
+//            while (l != null) {
+//                x = l;
+//                l = x.getLeft(null);
+//            }
+//
+//            while (x != null) {
+//                NodeBPlus n = nextUnlink(x);
+//
+//                x = n;
+//            }
+//        } finally {
+//            writeLock.unlock();
+//        }
     }
 
     private NodeBPlus nextUnlink(NodeBPlus x) {
