@@ -2070,24 +2070,4 @@ public class IndexBPlus implements Index {
 
     }
 
-    final class RowComparator implements ObjectComparator {
-
-        final Session session;
-
-        RowComparator(Session session) {
-            this.session = session;
-        }
-
-        public int compare(Object a, Object b) {
-            return IndexBPlus.this.compareRow(session, (Object[])a, (Object[])b);
-        }
-
-        public int hashCode(Object o) {
-            return o.hashCode();
-        }
-
-        public long longKey(Object o) {
-            return ((Row) o).getPos();
-        }
-    }
 }

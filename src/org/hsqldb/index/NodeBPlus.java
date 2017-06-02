@@ -121,7 +121,8 @@ public class NodeBPlus implements CachedObject {
 
     protected NodeBPlus[] keys     = new NodeBPlus[]{};
     protected NodeBPlus[] pointers = new NodeBPlus[]{};
-    protected NodeBPlus nextPage;    // next leaf node
+    protected NodeBPlus nextPage   = null;    // next leaf node
+    protected NodeBPlus lastPage   = null;    // last leaf node
 
     protected final Row row;
 
@@ -154,6 +155,7 @@ public class NodeBPlus implements CachedObject {
         ArrayUtil.clearArray(ArrayUtil.CLASS_CODE_OBJECT, keys, 0, keys.length);
         ArrayUtil.clearArray(ArrayUtil.CLASS_CODE_OBJECT, pointers, 0, pointers.length);
         nextPage = null;
+        lastPage = null;
         iBalance = 0;
         nLeft    = nRight = nParent = null;
     }
@@ -320,6 +322,10 @@ public class NodeBPlus implements CachedObject {
         return nextPage;
     }
 
+    public NodeBPlus getLastPage() {
+        return lastPage;
+    }
+
     public void setLeaf(boolean isLeaf) {
         this.isLeaf = isLeaf;
     }
@@ -351,6 +357,10 @@ public class NodeBPlus implements CachedObject {
 
     public void setNextPage(NodeBPlus n) {
         this.nextPage = n;
+    }
+
+    public void setLastPage(NodeBPlus n) {
+        this.lastPage = n;
     }
 
     public void updateAccessCount(int count) {}

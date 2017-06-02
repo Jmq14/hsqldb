@@ -248,8 +248,12 @@ public class IndexBPlusMemory extends IndexBPlus {
                 // copying the rest of temp node in new node
                 newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
 
-                // set next leaf node
+                // set next/last leaf node
+                if (n.getNextPage() != null) {
+                    n.getNextPage().setLastPage(newNode);
+                }
                 newNode.setNextPage(n.getNextPage());
+                newNode.setLastPage(n);
                 n.setNextPage(newNode);
 
                 // key that will be inserting into parent node
@@ -291,7 +295,11 @@ public class IndexBPlusMemory extends IndexBPlus {
                             newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
                             newNode.setPointers(temp.getPointers(), j, temp.getPointers().length);
 
+                            if (n.getNextPage() != null) {
+                                n.getNextPage().setLastPage(newNode);
+                            }
                             newNode.setNextPage(n.getNextPage());
+                            newNode.setLastPage(n);
                             n.setNextPage(newNode);
 
                             key = temp.getKeys()[j-1];
