@@ -80,10 +80,11 @@ import org.hsqldb.Table;
 import org.hsqldb.TableBase;
 import org.hsqldb.error.Error;
 import org.hsqldb.error.ErrorCode;
+import org.hsqldb.lib.ArraySort;
 import org.hsqldb.lib.ArrayUtil;
 import org.hsqldb.persist.PersistentStore;
 import org.hsqldb.types.Type;
-import java.util.LinkedList;
+import java.util.Stack;
 
 /**
  * Implementation of an BPlus for memory tables.<p>
@@ -183,18 +184,17 @@ public class IndexBPlusMemory extends IndexBPlus {
         NodeBPlus        n;
         NodeBPlus        x;
         int              compare = -1;
-        LinkedList<NodeBPlus> stack = new LinkedList<NodeBPlus>();
+        Stack<NodeBPlus> stack = new Stack<NodeBPlus>();
 
         writeLock.lock();
 
         try {
-            //n = getAccessor(store);  // root node
-            n = (NodeBPlus) store.getAccessor(this);
+            n = getAccessor(store);
             x = ((RowBPlus) row).getNode(position);
 
             if (n == null) {         // empty tree
 
-                n = newLinkNode(x);
+                n = newLeafNode(x);
                 store.setAccessor(this, n);   // root
 
                 return;
@@ -202,7 +202,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
             while (!n.isLeaf) {
                 // searching...
-                stack.addLast(n);
+                stack.push(n);
 
                 Row currentRow = n.getKeys()[0].row;
                 compare = searchCompare(currentRow, session, row);
@@ -224,25 +224,91 @@ public class IndexBPlusMemory extends IndexBPlus {
                     nextRow = n.getKeys()[i+1].row;
                     if (searchCompare(currentRow, session, row) >= 0 &&
                             searchCompare(nextRow, session, row) < 0) {
-                        n = n.getPointers()[i];
+                        n = n.getPointers()[i+1];
                     }
                 }
             }
 
 
-            if (n.getKeys().length < n.nodeSize) {  // if node hasn't been full
-                n.sortedInsert(x);
-            } else {                                // split the node
+            if (n.getKeys().length < n.nodeSize) {  // if node has not been full
+                n = insertNode(session, store, n, x, null);
+            } else {                                // else: split the node
+                // copying all current node contents in temp node then insert the new element on it
+                NodeBPlus temp = new NodeBPlus();
+                temp.setKeys(n.getKeys());
+                temp.setPointers(n.getPointers());
+                temp = insertNode(session, store, temp, x, null);
+
+                NodeBPlus newNode = new NodeBPlus();
+                int j = n.getPointers().length / 2;
+
+                //take the first half of the temp nde in current node
+                n.setKeys(temp.getKeys(), 0, j);
+
+                // copying the rest of temp node in new node
+                newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
+
+                // set next leaf node
+                newNode.setNextPage(n.getNextPage());
+                n.setNextPage(newNode);
+
+                // key that will be inserting into parent node
+                NodeBPlus key = temp.getKeys()[j];
+
+                while (true) {
+                    if (stack.isEmpty()) {
+                        // root case
+                        NodeBPlus root = new NodeBPlus(false, false);
+                        root.addKeys(key);
+                        root.addPointers(n);
+                        root.addPointers(newNode);
+
+                        store.setAccessor(this, root);
+                        break;
+                    }
+                    else {
+                        // parent case
+                        n = stack.pop();
+
+                        if (n.getKeys().length < n.nodeSize) {
+                            n = insertNode(session, store, n, key, newNode);
+                            break;
+                        }
+                        else {
+                            // splitting one internal nodes
+                            // copying them into new node and insert new elements in temp node
+                            // then dividing it into current node and new node
+                            temp.setLeaf(false);
+                            temp.setKeys(n.getKeys());
+                            temp.setPointers(n.getPointers());
+                            temp = insertNode(session, store, temp, key, newNode);
+
+                            j = temp.getPointers().length / 2;
+
+                            n.setKeys(temp.getKeys(), 0, j-1);
+                            n.setPointers(temp.getPointers(), 0, j);
+
+                            newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
+                            newNode.setPointers(temp.getPointers(), j, temp.getPointers().length);
+
+                            newNode.setNextPage(n.getNextPage());
+                            n.setNextPage(newNode);
+
+                            key = temp.getKeys()[j-1];
+                        }
+
+                    }
+                }
+
+
 
             }
-            //x = x.set(store, isleft, ((RowBPlus) row).getNode(position));
-            //balance(store, x, isleft);
         } finally {
             writeLock.unlock();
         }
     }
 
-    private int searchCompare(Row currentRow, Session session, Row row){
+    public int searchCompare(Row currentRow, Session session, Row row){
         boolean        compareSimple = isSimple;
         final Object[] rowData       = row.getData();
         boolean        compareRowId  = !isUnique || hasNulls(session, rowData);
@@ -277,317 +343,348 @@ public class IndexBPlusMemory extends IndexBPlus {
         return compare;
     }
 
+    private NodeBPlus insertNode(Session session, PersistentStore store,
+                                 NodeBPlus node, NodeBPlus key, NodeBPlus pointer) {
+//        RowComparator comparator = new RowComparator(session);
+//        ArrayUtil.toAdjustedArray(leaf.keys, data, 0, 1);
+//        ArraySort.sort(leaf.keys, 0, leaf.keys.length, comparator);
+        int pos = 0;
+
+        Row keyRow = key.row;
+        Row currentRow = node.getKeys()[0].row;
+
+        int compare = searchCompare(currentRow, session, keyRow);
+        if (compare < 0) {
+            pos = 0;
+        }
+
+        currentRow = node.getKeys()[node.getKeys().length-1].row;
+        compare = searchCompare(currentRow, session, keyRow);
+        if (compare >= 0) {
+            pos = node.getKeys().length;
+        }
+
+        Row nextRow = node.getKeys()[0].row;
+        for (int i=0; i < node.getKeys().length-1; i++) {
+            currentRow = nextRow;
+            nextRow = node.getKeys()[i+1].row;
+            if (searchCompare(currentRow, session, keyRow) >= 0 &&
+                    searchCompare(nextRow, session, keyRow) < 0) {
+                pos = i+1;
+            }
+        }
+
+        node.set(store, key, pointer, pos);
+        return node;
+    }
+
 
     /**
-     * Initialize a non-leaf node.
+     * Initialize a leaf node.
      */
-    private NodeBPlus newLinkNode(NodeBPlus leaf) {
+    private NodeBPlus newLeafNode(NodeBPlus leaf) {
         NodeBPlus x = new NodeBPlus();
         x.keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(
                 x.getKeys(), leaf, 0, 1);
-        x.pointers = (NodeBPlus[]) ArrayUtil.toAdjustedArray(
-                x.getKeys(), leaf, 0, 1);
-        x.pointers = (NodeBPlus[]) ArrayUtil.toAdjustedArray(
-                x.getKeys(), null, 1, 1);
         return x;
     }
 
     void delete(PersistentStore store, NodeBPlus x) {
 
-        if (x == null) {
-            return;
-        }
-
-        NodeBPlus n;
-
-        writeLock.lock();
-
-        try {
-            if (x.nLeft == null) {
-                n = x.nRight;
-            } else if (x.nRight == null) {
-                n = x.nLeft;
-            } else {
-                NodeBPlus d = x;
-
-                x = x.nLeft;
-
-                while (true) {
-                    NodeBPlus temp = x.nRight;
-
-                    if (temp == null) {
-                        break;
-                    }
-
-                    x = temp;
-                }
-
-                // x will be replaced with n later
-                n = x.nLeft;
-
-                // swap d and x
-                int b = x.iBalance;
-
-                x.iBalance = d.iBalance;
-                d.iBalance = b;
-
-                // set x.parent
-                NodeBPlus xp = x.nParent;
-                NodeBPlus dp = d.nParent;
-
-                if (d.isRoot(store)) {
-                    store.setAccessor(this, x);
-                }
-
-                x.nParent = dp;
-
-                if (dp != null) {
-                    if (dp.nRight == d) {
-                        dp.nRight = x;
-                    } else {
-                        dp.nLeft = x;
-                    }
-                }
-
-                // relink d.parent, x.left, x.right
-                if (d == xp) {
-                    d.nParent = x;
-
-                    if (d.nLeft == x) {
-                        x.nLeft = d;
-
-                        NodeBPlus dr = d.nRight;
-
-                        x.nRight = dr;
-                    } else {
-                        x.nRight = d;
-
-                        NodeBPlus dl = d.nLeft;
-
-                        x.nLeft = dl;
-                    }
-                } else {
-                    d.nParent = xp;
-                    xp.nRight = d;
-
-                    NodeBPlus dl = d.nLeft;
-                    NodeBPlus dr = d.nRight;
-
-                    x.nLeft  = dl;
-                    x.nRight = dr;
-                }
-
-                x.nRight.nParent = x;
-                x.nLeft.nParent  = x;
-
-                // set d.left, d.right
-                d.nLeft = n;
-
-                if (n != null) {
-                    n.nParent = d;
-                }
-
-                d.nRight = null;
-                x        = d;
-            }
-
-            boolean isleft = x.isFromLeft(store);
-
-            x.replace(store, this, n);
-
-            n = x.nParent;
-
-            x.delete();
-
-            while (n != null) {
-                x = n;
-
-                int sign = isleft ? 1
-                                  : -1;
-
-                switch (x.iBalance * sign) {
-
-                    case -1 :
-                        x.iBalance = 0;
-                        break;
-
-                    case 0 :
-                        x.iBalance = sign;
-
-                        return;
-
-                    case 1 :
-                        NodeBPlus r = x.child(store, !isleft);
-                        int     b = r.iBalance;
-
-                        if (b * sign >= 0) {
-                            x.replace(store, this, r);
-
-                            NodeBPlus child = r.child(store, isleft);
-
-                            x.set(store, !isleft, child);
-                            r.set(store, isleft, x);
-
-                            if (b == 0) {
-                                x.iBalance = sign;
-                                r.iBalance = -sign;
-
-                                return;
-                            }
-
-                            x.iBalance = 0;
-                            r.iBalance = 0;
-                            x          = r;
-                        } else {
-                            NodeBPlus l = r.child(store, isleft);
-
-                            x.replace(store, this, l);
-
-                            b = l.iBalance;
-
-                            r.set(store, isleft, l.child(store, !isleft));
-                            l.set(store, !isleft, r);
-                            x.set(store, !isleft, l.child(store, isleft));
-                            l.set(store, isleft, x);
-
-                            x.iBalance = (b == sign) ? -sign
-                                                     : 0;
-                            r.iBalance = (b == -sign) ? sign
-                                                      : 0;
-                            l.iBalance = 0;
-                            x          = l;
-                        }
-                }
-
-                isleft = x.isFromLeft(store);
-                n      = x.nParent;
-            }
-        } finally {
-            writeLock.unlock();
-        }
+//        if (x == null) {
+//            return;
+//        }
+//
+//        NodeBPlus n;
+//
+//        writeLock.lock();
+//
+//        try {
+//            if (x.nLeft == null) {
+//                n = x.nRight;
+//            } else if (x.nRight == null) {
+//                n = x.nLeft;
+//            } else {
+//                NodeBPlus d = x;
+//
+//                x = x.nLeft;
+//
+//                while (true) {
+//                    NodeBPlus temp = x.nRight;
+//
+//                    if (temp == null) {
+//                        break;
+//                    }
+//
+//                    x = temp;
+//                }
+//
+//                // x will be replaced with n later
+//                n = x.nLeft;
+//
+//                // swap d and x
+//                int b = x.iBalance;
+//
+//                x.iBalance = d.iBalance;
+//                d.iBalance = b;
+//
+//                // set x.parent
+//                NodeBPlus xp = x.nParent;
+//                NodeBPlus dp = d.nParent;
+//
+//                if (d.isRoot(store)) {
+//                    store.setAccessor(this, x);
+//                }
+//
+//                x.nParent = dp;
+//
+//                if (dp != null) {
+//                    if (dp.nRight == d) {
+//                        dp.nRight = x;
+//                    } else {
+//                        dp.nLeft = x;
+//                    }
+//                }
+//
+//                // relink d.parent, x.left, x.right
+//                if (d == xp) {
+//                    d.nParent = x;
+//
+//                    if (d.nLeft == x) {
+//                        x.nLeft = d;
+//
+//                        NodeBPlus dr = d.nRight;
+//
+//                        x.nRight = dr;
+//                    } else {
+//                        x.nRight = d;
+//
+//                        NodeBPlus dl = d.nLeft;
+//
+//                        x.nLeft = dl;
+//                    }
+//                } else {
+//                    d.nParent = xp;
+//                    xp.nRight = d;
+//
+//                    NodeBPlus dl = d.nLeft;
+//                    NodeBPlus dr = d.nRight;
+//
+//                    x.nLeft  = dl;
+//                    x.nRight = dr;
+//                }
+//
+//                x.nRight.nParent = x;
+//                x.nLeft.nParent  = x;
+//
+//                // set d.left, d.right
+//                d.nLeft = n;
+//
+//                if (n != null) {
+//                    n.nParent = d;
+//                }
+//
+//                d.nRight = null;
+//                x        = d;
+//            }
+//
+//            boolean isleft = x.isFromLeft(store);
+//
+//            x.replace(store, this, n);
+//
+//            n = x.nParent;
+//
+//            x.delete();
+//
+//            while (n != null) {
+//                x = n;
+//
+//                int sign = isleft ? 1
+//                                  : -1;
+//
+//                switch (x.iBalance * sign) {
+//
+//                    case -1 :
+//                        x.iBalance = 0;
+//                        break;
+//
+//                    case 0 :
+//                        x.iBalance = sign;
+//
+//                        return;
+//
+//                    case 1 :
+//                        NodeBPlus r = x.child(store, !isleft);
+//                        int     b = r.iBalance;
+//
+//                        if (b * sign >= 0) {
+//                            x.replace(store, this, r);
+//
+//                            NodeBPlus child = r.child(store, isleft);
+//
+//                            x.set(store, !isleft, child);
+//                            r.set(store, isleft, x);
+//
+//                            if (b == 0) {
+//                                x.iBalance = sign;
+//                                r.iBalance = -sign;
+//
+//                                return;
+//                            }
+//
+//                            x.iBalance = 0;
+//                            r.iBalance = 0;
+//                            x          = r;
+//                        } else {
+//                            NodeBPlus l = r.child(store, isleft);
+//
+//                            x.replace(store, this, l);
+//
+//                            b = l.iBalance;
+//
+//                            r.set(store, isleft, l.child(store, !isleft));
+//                            l.set(store, !isleft, r);
+//                            x.set(store, !isleft, l.child(store, isleft));
+//                            l.set(store, isleft, x);
+//
+//                            x.iBalance = (b == sign) ? -sign
+//                                                     : 0;
+//                            r.iBalance = (b == -sign) ? sign
+//                                                      : 0;
+//                            l.iBalance = 0;
+//                            x          = l;
+//                        }
+//                }
+//
+//                isleft = x.isFromLeft(store);
+//                n      = x.nParent;
+//            }
+//        } finally {
+//            writeLock.unlock();
+//        }
     }
 
     NodeBPlus next(PersistentStore store, NodeBPlus x) {
 
-        NodeBPlus r = x.nRight;
-
-        if (r != null) {
-            x = r;
-
-            NodeBPlus l = x.nLeft;
-
-            while (l != null) {
-                x = l;
-                l = x.nLeft;
-            }
-
-            return x;
-        }
-
-        NodeBPlus ch = x;
-
-        x = x.nParent;
-
-        while (x != null && ch == x.nRight) {
-            ch = x;
-            x  = x.nParent;
-        }
-
+//        NodeBPlus r = x.nRight;
+//
+//        if (r != null) {
+//            x = r;
+//
+//            NodeBPlus l = x.nLeft;
+//
+//            while (l != null) {
+//                x = l;
+//                l = x.nLeft;
+//            }
+//
+//            return x;
+//        }
+//
+//        NodeBPlus ch = x;
+//
+//        x = x.nParent;
+//
+//        while (x != null && ch == x.nRight) {
+//            ch = x;
+//            x  = x.nParent;
+//        }
+//
         return x;
     }
 
     NodeBPlus last(PersistentStore store, NodeBPlus x) {
 
-        if (x == null) {
-            return null;
-        }
-
-        NodeBPlus left = x.nLeft;
-
-        if (left != null) {
-            x = left;
-
-            NodeBPlus right = x.nRight;
-
-            while (right != null) {
-                x     = right;
-                right = x.nRight;
-            }
-
-            return x;
-        }
-
-        NodeBPlus ch = x;
-
-        x = x.nParent;
-
-        while (x != null && ch.equals(x.nLeft)) {
-            ch = x;
-            x  = x.nParent;
-        }
-
+//        if (x == null) {
+//            return null;
+//        }
+//
+//        NodeBPlus left = x.nLeft;
+//
+//        if (left != null) {
+//            x = left;
+//
+//            NodeBPlus right = x.nRight;
+//
+//            while (right != null) {
+//                x     = right;
+//                right = x.nRight;
+//            }
+//
+//            return x;
+//        }
+//
+//        NodeBPlus ch = x;
+//
+//        x = x.nParent;
+//
+//        while (x != null && ch.equals(x.nLeft)) {
+//            ch = x;
+//            x  = x.nParent;
+//        }
+//
         return x;
     }
 
-    /**
-     * Balances part of the tree after an alteration to the index.
-     */
-    void balance(PersistentStore store, NodeBPlus x, boolean isleft) {
-
-        while (true) {
-            int sign = isleft ? 1
-                              : -1;
-
-            switch (x.iBalance * sign) {
-
-                case 1 :
-                    x.iBalance = 0;
-
-                    return;
-
-                case 0 :
-                    x.iBalance = -sign;
-                    break;
-
-                case -1 :
-                    NodeBPlus l = isleft ? x.nLeft
-                                       : x.nRight;
-
-                    if (l.iBalance == -sign) {
-                        x.replace(store, this, l);
-                        x.set(store, isleft, l.child(store, !isleft));
-                        l.set(store, !isleft, x);
-
-                        x.iBalance = 0;
-                        l.iBalance = 0;
-                    } else {
-                        NodeBPlus r = !isleft ? l.nLeft
-                                            : l.nRight;
-
-                        x.replace(store, this, r);
-                        l.set(store, !isleft, r.child(store, isleft));
-                        r.set(store, isleft, l);
-                        x.set(store, isleft, r.child(store, !isleft));
-                        r.set(store, !isleft, x);
-
-                        int rb = r.iBalance;
-
-                        x.iBalance = (rb == -sign) ? sign
-                                                   : 0;
-                        l.iBalance = (rb == sign) ? -sign
-                                                  : 0;
-                        r.iBalance = 0;
-                    }
-
-                    return;
-            }
-
-            if (x.nParent == null) {
-                return;
-            }
-
-            isleft = x.nParent == null || x == x.nParent.nLeft;
-            x      = x.nParent;
-        }
-    }
+//    /**
+//     * Balances part of the tree after an alteration to the index.
+//     */
+//    void balance(PersistentStore store, NodeBPlus x, boolean isleft) {
+//
+//        while (true) {
+//            int sign = isleft ? 1
+//                              : -1;
+//
+//            switch (x.iBalance * sign) {
+//
+//                case 1 :
+//                    x.iBalance = 0;
+//
+//                    return;
+//
+//                case 0 :
+//                    x.iBalance = -sign;
+//                    break;
+//
+//                case -1 :
+//                    NodeBPlus l = isleft ? x.nLeft
+//                                       : x.nRight;
+//
+//                    if (l.iBalance == -sign) {
+//                        x.replace(store, this, l);
+//                        x.set(store, isleft, l.child(store, !isleft));
+//                        l.set(store, !isleft, x);
+//
+//                        x.iBalance = 0;
+//                        l.iBalance = 0;
+//                    } else {
+//                        NodeBPlus r = !isleft ? l.nLeft
+//                                            : l.nRight;
+//
+//                        x.replace(store, this, r);
+//                        l.set(store, !isleft, r.child(store, isleft));
+//                        r.set(store, isleft, l);
+//                        x.set(store, isleft, r.child(store, !isleft));
+//                        r.set(store, !isleft, x);
+//
+//                        int rb = r.iBalance;
+//
+//                        x.iBalance = (rb == -sign) ? sign
+//                                                   : 0;
+//                        l.iBalance = (rb == sign) ? -sign
+//                                                  : 0;
+//                        r.iBalance = 0;
+//                    }
+//
+//                    return;
+//            }
+//
+//            if (x.nParent == null) {
+//                return;
+//            }
+//
+//            isleft = x.nParent == null || x == x.nParent.nLeft;
+//            x      = x.nParent;
+//        }
+//    }
 }

@@ -247,6 +247,8 @@ public interface Index extends SchemaObject {
 
     public int compareRow(Session session, Object[] a, Object[] b);
 
+    public int searchCompare(Row currentRow, Session session, Row row);
+
     public static class IndexUse {
 
         public Index index;

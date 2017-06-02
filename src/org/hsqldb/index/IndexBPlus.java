@@ -88,6 +88,7 @@ import org.hsqldb.TransactionManager;
 import org.hsqldb.error.Error;
 import org.hsqldb.error.ErrorCode;
 import org.hsqldb.lib.ArrayUtil;
+import org.hsqldb.lib.ObjectComparator;
 import org.hsqldb.lib.OrderedHashSet;
 import org.hsqldb.lib.ReadWriteLockDummy;
 import org.hsqldb.navigator.RowIterator;
@@ -1926,6 +1927,31 @@ public class IndexBPlus implements Index {
         }
     }
 
+    public int searchCompare(Row currentRow, Session session, Row row){
+        final Object[] rowData       = row.getData();
+        boolean        compareRowId  = !isUnique || hasNulls(session, rowData);
+        int            compare       = 0;
+
+        compare = compareRowForInsertOrDelete(session, row,
+                currentRow,
+                compareRowId, 0);
+
+        if (compare == 0) {
+            if (isConstraint) {
+                Constraint c =
+                        ((Table) table).getUniqueConstraintForIndex(this);
+
+                throw c.getException(row.getData());
+            } else {
+                throw Error.error(ErrorCode.X_23505,
+                        name.statementName);
+            }
+        }
+
+        return compare;
+    }
+
+
     NodeBPlus getAccessor(PersistentStore store) {
 
         NodeBPlus node = (NodeBPlus) store.getAccessor(this);
@@ -2039,6 +2065,29 @@ public class IndexBPlus implements Index {
 
         public long getRowId() {
             return nextnode.getPos();
+        }
+
+
+    }
+
+    final class RowComparator implements ObjectComparator {
+
+        final Session session;
+
+        RowComparator(Session session) {
+            this.session = session;
+        }
+
+        public int compare(Object a, Object b) {
+            return IndexBPlus.this.compareRow(session, (Object[])a, (Object[])b);
+        }
+
+        public int hashCode(Object o) {
+            return o.hashCode();
+        }
+
+        public long longKey(Object o) {
+            return ((Row) o).getPos();
         }
     }
 }

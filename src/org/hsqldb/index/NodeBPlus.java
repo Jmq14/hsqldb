@@ -73,7 +73,9 @@ package org.hsqldb.index;
 import org.hsqldb.Row;
 import org.hsqldb.RowBPlus;
 import org.hsqldb.RowBPlusDisk;
+import org.hsqldb.lib.ArrayUtil;
 import org.hsqldb.lib.LongLookup;
+import org.hsqldb.lib.ObjectComparator;
 import org.hsqldb.persist.CachedObject;
 import org.hsqldb.persist.PersistentStore;
 import org.hsqldb.rowio.RowOutputInterface;
@@ -107,6 +109,8 @@ public class NodeBPlus implements CachedObject {
     static final int NO_POS = RowBPlusDisk.NO_POS;
     public int       iBalance;
     public boolean   isLeaf;
+    public boolean   isData;        // Note: data node is a corresponding node to a single row
+                                    // in oder to organize the data.
     public int       nodeSize = 3;
     public NodeBPlus   nNext;    // node of next index (nNext==null || nNext.iId=iId+1)
 
@@ -117,32 +121,39 @@ public class NodeBPlus implements CachedObject {
 
     protected NodeBPlus[] keys     = new NodeBPlus[]{};
     protected NodeBPlus[] pointers = new NodeBPlus[]{};
-    private NodeBPlus prev;
-    private NodeBPlus next;
+    protected NodeBPlus nextPage;    // next leaf node
 
     protected final Row row;
 
     NodeBPlus() {
+        // default new created leaf node
         row = null;
-        isLeaf = false;
+        isLeaf = true;
+        isData = false;
     }
 
     public NodeBPlus(Row r) {
+        // default new created data node
         row = r;
-        isLeaf = true;
+        isLeaf = false;
+        isData = true;
     }
 
-    public NodeBPlus(boolean isLeaf){
-        this.isLeaf = isLeaf;
+    public NodeBPlus(boolean isData, boolean isLeaf){
+        // new created interior node
         this.row    = null;
+        this.isLeaf = isLeaf;
+        this.isData = isData;
     }
 
-//    public NodeBPlus(boolean isLeaf, Row r) {
-//        this.isLeaf = isLeaf;
-//        this.row = r;
-//    }
+    public NodeBPlus newInteriorNode(){
+        return new NodeBPlus(false, false);
+    }
 
     public void delete() {
+        ArrayUtil.clearArray(ArrayUtil.CLASS_CODE_OBJECT, keys, 0, keys.length);
+        ArrayUtil.clearArray(ArrayUtil.CLASS_CODE_OBJECT, pointers, 0, pointers.length);
+        nextPage = null;
         iBalance = 0;
         nLeft    = nRight = nParent = null;
     }
@@ -217,6 +228,19 @@ public class NodeBPlus implements CachedObject {
                       : getRight(store);
     }
 
+    public NodeBPlus set(PersistentStore store, NodeBPlus key, NodeBPlus pointer, int pos) {
+        if (isLeaf) {
+            // leaf node
+            ArrayUtil.toAdjustedArray(keys, key, pos, 1);
+        }
+        else {
+            // interior node
+            ArrayUtil.toAdjustedArray(keys, key, pos, 1);
+            ArrayUtil.toAdjustedArray(pointer, pointer, pos+1, 1);
+        }
+        return this;
+    }
+
     public NodeBPlus set(PersistentStore store, boolean isLeft, NodeBPlus n) {
 
         if (isLeft) {
@@ -234,15 +258,16 @@ public class NodeBPlus implements CachedObject {
 
     public void replace(PersistentStore store, Index index, NodeBPlus n) {
 
-        if (nParent == null) {
-            if (n != null) {
-                n = n.setParent(store, null);
-            }
-
-            store.setAccessor(index, n);
-        } else {
-            nParent.set(store, isFromLeft(store), n);
-        }
+        // TODO
+//        if (nParent == null) {
+//            if (n != null) {
+//                n = n.setParent(store, null);
+//            }
+//
+//            store.setAccessor(index, n);
+//        } else {
+//            nParent.set(store, isFromLeft(store), n);
+//        }
     }
 
     boolean equals(NodeBPlus n) {
@@ -266,11 +291,21 @@ public class NodeBPlus implements CachedObject {
     }
 
     public RowBPlus getRow(PersistentStore store) {
-        return (RowBPlus) row;
+        if (isData) {
+            return (RowBPlus) row;
+        }
+        else {
+            return null;
+        }
     }
 
     protected Object[] getData(PersistentStore store) {
-        return row.getData();
+        if (isData) {
+            return row.getData();
+        }
+        else {
+            return null;
+        }
     }
 
     public NodeBPlus[] getKeys() {
@@ -279,6 +314,43 @@ public class NodeBPlus implements CachedObject {
 
     public NodeBPlus[] getPointers() {
         return pointers;
+    }
+
+    public NodeBPlus getNextPage() {
+        return nextPage;
+    }
+
+    public void setLeaf(boolean isLeaf) {
+        this.isLeaf = isLeaf;
+    }
+
+    public void setKeys(NodeBPlus[] keys) {
+        ArrayUtil.copyArray(keys, this.keys, keys.length);
+    }
+
+    public void setKeys(NodeBPlus[] keys, int start, int end) {
+        ArrayUtil.copyArray(keys, this.keys, start, end);
+    }
+
+    public void addKeys(NodeBPlus key) {
+        ArrayUtil.toAdjustedArray(this.keys, key, this.keys.length, 1);
+    }
+
+    public void setPointers(NodeBPlus[] pointers) {
+        ArrayUtil.copyArray(pointers, this.pointers, pointers.length);
+//        this.pointers = (NodeBPlus[]) ArrayUtil.duplicateArray(pointers);
+    }
+
+    public void setPointers(NodeBPlus[] pointers, int start, int end) {
+        ArrayUtil.copyArray(pointers, this.pointers, start, end);
+    }
+
+    public void addPointers(NodeBPlus pointer){
+        ArrayUtil.toAdjustedArray(this.pointers, pointer, this.pointers.length, 1);
+    }
+
+    public void setNextPage(NodeBPlus n) {
+        this.nextPage = n;
     }
 
     public void updateAccessCount(int count) {}
@@ -332,12 +404,5 @@ public class NodeBPlus implements CachedObject {
         return true;
     }
 
-    public void sortedInsert(NodeBPlus leafNode) {
-        if (this.isLeaf) {
-            // TODO: raise error;
-            return;
-        }
 
-
-    }
 }

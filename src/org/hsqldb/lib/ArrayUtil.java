@@ -1010,6 +1010,10 @@ public class ArrayUtil {
         System.arraycopy(source, 0, dest, 0, count);
     }
 
+    public static void copyArray(Object source, Object dest, int start, int end) {
+        System.arraycopy(source, start, dest, 0, end-start);
+    }
+
     public static void copyMoveSegment(Object source, Object dest, int size,
                                        int index, int segmentSize,
                                        int destIndex) {
