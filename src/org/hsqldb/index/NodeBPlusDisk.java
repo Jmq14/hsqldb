@@ -226,7 +226,7 @@ public class NodeBPlusDisk extends NodeBPlus {
         row.setNodesChanged();
 
         node.iParent = n == null ? NO_POS
-                                 : (int) ((NodeBPlusDisk) n).getID();
+                                 : (int) n.getPos();
         node.nParent = (NodeBPlusDisk) n;
 
         row.keepInMemory(false);

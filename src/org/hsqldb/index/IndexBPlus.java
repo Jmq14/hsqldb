@@ -444,7 +444,7 @@ public class IndexBPlus implements Index {
 
             while (true) {
                 node = temp;
-                temp = node.getLeft(store);
+                temp = node.getKeys()[0];
 
                 if (temp == null) {
                     break;
@@ -477,19 +477,19 @@ public class IndexBPlus implements Index {
                 counter++;
             }
 
-            if (probeDeeper) {
-                double[] factors = new double[colIndex.length];
-                int extras = probeFactor(session, store, factors, true)
-                             + probeFactor(session, store, factors, false);
-
-                for (int i = 0; i < colIndex.length; i++) {
-                    factors[i] /= 2;
-
-                    for (int j = 0; j < factors[i]; j++) {
-                        changes[i] *= 2;
-                    }
-                }
-            }
+//            if (probeDeeper) {
+//                double[] factors = new double[colIndex.length];
+//                int extras = probeFactor(session, store, factors, true)
+//                             + probeFactor(session, store, factors, false);
+//
+//                for (int i = 0; i < colIndex.length; i++) {
+//                    factors[i] /= 2;
+//
+//                    for (int j = 0; j < factors[i]; j++) {
+//                        changes[i] *= 2;
+//                    }
+//                }
+//            }
 
             long rowCount = store.elementCount();
 
@@ -518,32 +518,32 @@ public class IndexBPlus implements Index {
         }
     }
 
-    int probeFactor(Session session, PersistentStore store, double[] changes,
-                    boolean left) {
-
-        int     depth = 0;
-        NodeBPlus x     = getAccessor(store);
-        NodeBPlus n     = x;
-
-        if (x == null) {
-            return 0;
-        }
-
-        while (n != null) {
-            x = n;
-            n = left ? x.getLeft(store)
-                     : x.getRight(store);
-
-            depth++;
-
-            if (depth > probeDepth && n != null) {
-                compareRowForChange(session, x.getData(store),
-                                    n.getData(store), changes);
-            }
-        }
-
-        return depth - probeDepth;
-    }
+//    int probeFactor(Session session, PersistentStore store, double[] changes,
+//                    boolean left) {
+//
+//        int     depth = 0;
+//        NodeBPlus x     = getAccessor(store);
+//        NodeBPlus n     = x;
+//
+//        if (x == null) {
+//            return 0;
+//        }
+//
+//        while (n != null) {
+//            x = n;
+//            n = left ? x.getLeft(store)
+//                     : x.getRight(store);
+//
+//            depth++;
+//
+//            if (depth > probeDepth && n != null) {
+//                compareRowForChange(session, x.getData(store),
+//                                    n.getData(store), changes);
+//            }
+//        }
+//
+//        return depth - probeDepth;
+//    }
 
     public long getNodeCount(Session session, PersistentStore store) {
 
@@ -605,41 +605,41 @@ public class IndexBPlus implements Index {
 
     private NodeBPlus nextUnlink(NodeBPlus x) {
 
-        NodeBPlus temp = x.getRight(null);
-
-        if (temp != null) {
-            x    = temp;
-            temp = x.getLeft(null);
-
-            while (temp != null) {
-                x    = temp;
-                temp = x.getLeft(null);
-            }
-
-            return x;
-        }
-
-        temp = x;
-        x    = x.getParent(null);
-
-        while (x != null && x.isRight(temp)) {
-            x.nRight = null;
-
-            temp.getRow(null).destroy();
-            temp.delete();
-
-            //
-            temp = x;
-            x    = x.getParent(null);
-        }
-
-        if (x != null) {
-            x.nLeft = null;
-        }
-
-        temp.getRow(null).destroy();
-        temp.delete();
-
+//        NodeBPlus temp = x.getRight(null);
+//
+//        if (temp != null) {
+//            x    = temp;
+//            temp = x.getLeft(null);
+//
+//            while (temp != null) {
+//                x    = temp;
+//                temp = x.getLeft(null);
+//            }
+//
+//            return x;
+//        }
+//
+//        temp = x;
+//        x    = x.getParent(null);
+//
+//        while (x != null && x.isRight(temp)) {
+//            x.nRight = null;
+//
+//            temp.getRow(null).destroy();
+//            temp.delete();
+//
+//            //
+//            temp = x;
+//            x    = x.getParent(null);
+//        }
+//
+//        if (x != null) {
+//            x.nLeft = null;
+//        }
+//
+//        temp.getRow(null).destroy();
+//        temp.delete();
+//
         return x;
     }
 
@@ -651,15 +651,13 @@ public class IndexBPlus implements Index {
             NodeBPlus p = getAccessor(store);
             NodeBPlus f = null;
 
-            while (p != null) {
+            while (p != null ) {
                 f = p;
 
                 checkNodes(store, p);
 
-                p = p.getLeft(store);
+                p = p.getKeys()[0];
             }
-
-            p = f;
 
             while (f != null) {
                 checkNodes(store, f);
@@ -671,25 +669,42 @@ public class IndexBPlus implements Index {
         }
     }
 
+
+
     void checkNodes(PersistentStore store, NodeBPlus p) {
 
-        NodeBPlus l = p.getLeft(store);
-        NodeBPlus r = p.getRight(store);
-
-        if (l != null && l.getBalance(store) == -2) {
-            System.out.print("broken index - deleted");
+        if (p.isLeaf) {
+            if (p.isData
+                    || p.getParent(store)!=null
+                    || p.getPointers().length>0)  {
+                System.out.print("broken index - node type");
+            }
         }
 
-        if (r != null && r.getBalance(store) == -2) {
-            System.out.print("broken index -deleted");
+        else if (p.isData) {
+            if (p.isLeaf|| p.getParent(store) == null
+                    || p.getKeys().length > 0
+                    || p.getPointers().length > 0) {
+                System.out.print("broken index - node type");
+            }
+
+            NodeBPlus parent = p.getParent(store);
+            boolean flag = false;
+            for (int i=0; i<parent.getKeys().length; i++) {
+                if (p.equals(parent.getKeys()[i])) {
+                    flag = true;
+                    break;
+                }
+            }
+            if (!flag) {
+                System.out.print("broken index - no parent");
+            }
         }
 
-        if (l != null && !p.equals(l.getParent(store))) {
-            System.out.print("broken index - no parent");
-        }
-
-        if (r != null && !p.equals(r.getParent(store))) {
-            System.out.print("broken index - no parent");
+        else {
+            if (p.getKeys().length + 1 != p.getPointers().length) {
+                System.out.print("broken index - no match in key & pointer");
+            }
         }
     }
 
@@ -1948,53 +1963,6 @@ public class IndexBPlus implements Index {
         return x;
     }
 
-    NodeBPlus next(PersistentStore store, NodeBPlus x, int depth, int maxDepth,
-                 int[] depths) {
-
-        NodeBPlus temp = depth == maxDepth ? null
-                                         : x.getRight(store);
-
-        if (temp != null) {
-            depth++;
-
-            x    = temp;
-            temp = depth == maxDepth ? null
-                                     : x.getLeft(store);
-
-            while (temp != null) {
-                depth++;
-
-                x = temp;
-
-                if (depth == maxDepth) {
-                    temp = null;
-                } else {
-                    temp = x.getLeft(store);
-                }
-            }
-
-            depths[0] = depth;
-
-            return x;
-        }
-
-        temp = x;
-        x    = x.getParent(store);
-
-        depth--;
-
-        while (x != null && x.isRight(temp)) {
-            temp = x;
-            x    = x.getParent(store);
-
-            depth--;
-        }
-
-        depths[0] = depth;
-
-        return x;
-    }
-
     NodeBPlus last(PersistentStore store, NodeBPlus x) {
 
         if (x == null) {
@@ -2556,66 +2524,6 @@ public class IndexBPlus implements Index {
         }
     }
 
-    /**
-     * Balances part of the tree after an alteration to the index.
-     */
-    void balance(PersistentStore store, NodeBPlus x, boolean isleft) {
-
-        while (true) {
-            int sign = isleft ? 1
-                              : -1;
-
-            switch (x.getBalance(store) * sign) {
-
-                case 1 :
-                    x = x.setBalance(store, 0);
-
-                    return;
-
-                case 0 :
-                    x = x.setBalance(store, -sign);
-                    break;
-
-                case -1 :
-                    NodeBPlus l = x.child(store, isleft);
-
-                    if (l.getBalance(store) == -sign) {
-                        x.replace(store, this, l);
-
-                        x = x.set(store, isleft, l.child(store, !isleft));
-                        l = l.set(store, !isleft, x);
-                        x = x.setBalance(store, 0);
-                        l = l.setBalance(store, 0);
-                    } else {
-                        NodeBPlus r = l.child(store, !isleft);
-
-                        x.replace(store, this, r);
-
-                        l = l.set(store, !isleft, r.child(store, isleft));
-                        r = r.set(store, isleft, l);
-                        x = x.set(store, isleft, r.child(store, !isleft));
-                        r = r.set(store, !isleft, x);
-
-                        int rb = r.getBalance(store);
-
-                        x = x.setBalance(store, (rb == -sign) ? sign
-                                                              : 0);
-                        l = l.setBalance(store, (rb == sign) ? -sign
-                                                             : 0);
-                        r = r.setBalance(store, 0);
-                    }
-
-                    return;
-            }
-
-            if (x.isRoot(store)) {
-                return;
-            }
-
-            isleft = x.isFromLeft(store);
-            x      = x.getParent(store);
-        }
-    }
 
     public int searchCompare(Row currentRow, Session session, Row row){
         final Object[] rowData       = row.getData();

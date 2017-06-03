@@ -53,8 +53,6 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
     final RowBPlusDisk row;
 
     //
-    private long            iLeft   = NO_POS;
-    private long            iRight  = NO_POS;
     private long            iParent = NO_POS;
     private int             iId;    // id of Index object for this Node
     public static final int SIZE_IN_BYTE = 4 * 4;
@@ -67,23 +65,10 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
         row      = r;
         iId      = id;
         ext      = in.readInt();
-        iBalance = (byte) ext;
-        iLeft    = in.readInt() & 0xffffffffL;
-        iRight   = in.readInt() & 0xffffffffL;
         iParent  = in.readInt() & 0xffffffffL;
 
         if (ext > 0xff) {
             iParent |= (((long) ext << 8) & 0xff00000000L);
-            iLeft   |= (((long) ext << 16) & 0xff00000000L);
-            iRight  |= (((long) ext << 24) & 0xff00000000L);
-        }
-
-        if (iLeft == 0) {
-            iLeft = NO_POS;
-        }
-
-        if (iRight == 0) {
-            iRight = NO_POS;
         }
 
         if (iParent == 0) {
@@ -98,13 +83,8 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
 
     public void delete() {
 
-        iLeft    = NO_POS;
-        iRight   = NO_POS;
         iParent  = NO_POS;
-        nLeft    = null;
-        nRight   = null;
         nParent  = null;
-        iBalance = 0;
 
         row.setNodesChanged();
     }
@@ -119,6 +99,10 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
 
     public long getPos() {
         return row.getPos();
+    }
+
+    public int getID() {
+        return iId;
     }
 
     public RowBPlus getRow(PersistentStore store) {
@@ -148,68 +132,6 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
         return ret;
     }
 
-    boolean isLeft(NodeBPlus n) {
-
-        if (n == null) {
-            return iLeft == NO_POS;
-        }
-
-        return iLeft == n.getPos();
-    }
-
-    boolean isRight(NodeBPlus n) {
-
-        if (n == null) {
-            return iRight == NO_POS;
-        }
-
-        return iRight == n.getPos();
-    }
-
-    NodeBPlus getLeft(PersistentStore store) {
-
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.isInMemory()) {
-            row  = (RowBPlusDisk) store.get(this.row, false);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        if (node.iLeft == NO_POS) {
-            return null;
-        }
-
-        if (node.nLeft == null || !node.nLeft.isInMemory()) {
-            node.nLeft         = findNode(store, node.iLeft);
-            node.nLeft.nParent = node;
-        }
-
-        return node.nLeft;
-    }
-
-    NodeBPlus getRight(PersistentStore store) {
-
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.isInMemory()) {
-            row  = (RowBPlusDisk) store.get(this.row, false);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        if (node.iRight == NO_POS) {
-            return null;
-        }
-
-        if (node.nRight == null || !node.nRight.isInMemory()) {
-            node.nRight         = findNode(store, node.iRight);
-            node.nRight.nParent = node;
-        }
-
-        return node.nRight;
-    }
-
     NodeBPlus getParent(PersistentStore store) {
 
         NodeBPlusDiskLarge node = this;
@@ -231,58 +153,6 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
         return node.nParent;
     }
 
-    public int getBalance(PersistentStore store) {
-
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.isInMemory()) {
-            row  = (RowBPlusDisk) store.get(this.row, false);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        return node.iBalance;
-    }
-
-    boolean isRoot(PersistentStore store) {
-
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.isInMemory()) {
-            row  = (RowBPlusDisk) store.get(this.row, false);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        return node.iParent == NO_POS;
-    }
-
-    boolean isFromLeft(PersistentStore store) {
-
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.isInMemory()) {
-            row  = (RowBPlusDisk) store.get(this.row, false);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        if (node.iParent == NO_POS) {
-            return true;
-        }
-
-        if (node.nParent == null || !node.nParent.isInMemory()) {
-            node.nParent = findNode(store, iParent);
-        }
-
-        return row.getPos() == ((NodeBPlusDiskLarge) node.nParent).iLeft;
-    }
-
-    public NodeBPlus child(PersistentStore store, boolean isleft) {
-        return isleft ? getLeft(store)
-                      : getRight(store);
-    }
-
     NodeBPlus setParent(PersistentStore store, NodeBPlus n) {
 
         NodeBPlusDiskLarge node = this;
@@ -302,7 +172,7 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
         row.setNodesChanged();
 
         node.iParent = n == null ? NO_POS
-                                 : n.getPos();
+                                 : ((NodeBPlusDisk) n).getID();
 
         if (n != null && !n.isInMemory()) {
             n = findNode(store, n.getPos());
@@ -315,129 +185,31 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
         return node;
     }
 
-    public NodeBPlus setBalance(PersistentStore store, int b) {
 
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.keepInMemory(true)) {
-            row  = (RowBPlusDisk) store.get(this.row, true);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        if (!row.isInMemory()) {
-            throw Error.runtimeError(ErrorCode.U_S0500, "NodeBPlusDisk");
-        }
-
-        row.setNodesChanged();
-
-        node.iBalance = b;
-
-        row.keepInMemory(false);
-
-        return node;
-    }
-
-    NodeBPlus setLeft(PersistentStore store, NodeBPlus n) {
-
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.keepInMemory(true)) {
-            row  = (RowBPlusDisk) store.get(this.row, true);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        if (!row.isInMemory()) {
-            throw Error.runtimeError(ErrorCode.U_S0500, "NodeBPlusDisk");
-        }
-
-        row.setNodesChanged();
-
-        node.iLeft = n == null ? NO_POS
-                               : n.getPos();
-
-        if (n != null && !n.isInMemory()) {
-            n = findNode(store, n.getPos());
-        }
-
-        node.nLeft = (NodeBPlusDiskLarge) n;
-
-        row.keepInMemory(false);
-
-        return node;
-    }
-
-    NodeBPlus setRight(PersistentStore store, NodeBPlus n) {
-
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.keepInMemory(true)) {
-            row  = (RowBPlusDisk) store.get(this.row, true);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        if (!row.isInMemory()) {
-            throw Error.runtimeError(ErrorCode.U_S0500, "NodeBPlusDisk");
-        }
-
-        row.setNodesChanged();
-
-        node.iRight = n == null ? NO_POS
-                                : n.getPos();
-
-        if (n != null && !n.isInMemory()) {
-            n = findNode(store, n.getPos());
-        }
-
-        node.nRight = (NodeBPlusDiskLarge) n;
-
-        row.keepInMemory(false);
-
-        return node;
-    }
-
-    public NodeBPlus set(PersistentStore store, boolean isLeft, NodeBPlus n) {
-
-        NodeBPlus x;
-
-        if (isLeft) {
-            x = setLeft(store, n);
-        } else {
-            x = setRight(store, n);
-        }
-
-        if (n != null) {
-            n.setParent(store, this);
-        }
-
-        return x;
-    }
 
     public void replace(PersistentStore store, Index index, NodeBPlus n) {
 
-        NodeBPlusDiskLarge node = this;
-        RowBPlusDisk  row  = this.row;
-
-        if (!row.keepInMemory(true)) {
-            row  = (RowBPlusDisk) store.get(this.row, true);
-            node = (NodeBPlusDiskLarge) row.getNode(iId);
-        }
-
-        if (node.iParent == NO_POS) {
-            if (n != null) {
-                n = n.setParent(store, null);
-            }
-
-            store.setAccessor(index, n);
-        } else {
-            boolean isFromLeft = node.isFromLeft(store);
-
-            node.getParent(store).set(store, isFromLeft, n);
-        }
-
-        row.keepInMemory(false);
+//        NodeBPlusDiskLarge node = this;
+//        RowBPlusDisk  row  = this.row;
+//
+//        if (!row.keepInMemory(true)) {
+//            row  = (RowBPlusDisk) store.get(this.row, true);
+//            node = (NodeBPlusDiskLarge) row.getNode(iId);
+//        }
+//
+//        if (node.iParent == NO_POS) {
+//            if (n != null) {
+//                n = n.setParent(store, null);
+//            }
+//
+//            store.setAccessor(index, n);
+//        } else {
+//            boolean isFromLeft = node.isFromLeft(store);
+//
+//            node.getParent(store).set(store, isFromLeft, n);
+//        }
+//
+//        row.keepInMemory(false);
     }
 
     boolean equals(NodeBPlus n) {
@@ -456,23 +228,15 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
     public void setInMemory(boolean in) {
 
         if (!in) {
-            if (nLeft != null) {
-                nLeft.nParent = null;
-            }
-
-            if (nRight != null) {
-                nRight.nParent = null;
-            }
-
             if (nParent != null) {
-                if (row.getPos() == ((NodeBPlusDiskLarge) nParent).iLeft) {
-                    nParent.nLeft = null;
-                } else {
-                    nParent.nRight = null;
+                for (int i=0; i < nParent.getKeys().length; i++) {
+                    if (row.getPos() == nParent.getKeys()[i].getPos()) {
+                        nParent.getKeys()[i] = null;
+                    }
                 }
             }
 
-            nLeft = nRight = nParent = null;
+            nParent = null;
         }
     }
 
@@ -482,24 +246,12 @@ public class NodeBPlusDiskLarge extends NodeBPlus {
 
     public void write(RowOutputInterface out, LongLookup lookup) {
 
-        long leftTemp   = getTranslatePointer(iLeft, lookup);
-        long rightTemp  = getTranslatePointer(iRight, lookup);
         long parentTemp = getTranslatePointer(iParent, lookup);
         int  ext        = 0;
 
         ext |= (int) ((parentTemp & 0xff00000000L) >> 8);
-        ext |= (int) ((leftTemp & 0xff00000000L) >> 16);
-        ext |= (int) ((rightTemp & 0xff00000000L) >> 24);
-
-        if (ext == 0) {
-            ext = iBalance;
-        } else {
-            ext |= (iBalance & 0xff);
-        }
 
         out.writeInt(ext);
-        out.writeInt((int) leftTemp);
-        out.writeInt((int) rightTemp);
         out.writeInt((int) parentTemp);
     }
 

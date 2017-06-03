@@ -123,68 +123,7 @@ public class IndexBPlusMemory extends IndexBPlus {
               unique, constraint, forward);
     }
 
-    public void checkIndex(PersistentStore store) {
 
-        readLock.lock();
-
-        try {
-            NodeBPlus p = getAccessor(store);
-            NodeBPlus f = null;
-
-            while (p != null ) {
-                f = p;
-
-                checkNodes(store, p);
-
-                p = p.getKeys()[0];
-            }
-
-            while (f != null) {
-                checkNodes(store, f);
-
-                f = next(store, f);
-            }
-        } finally {
-            readLock.unlock();
-        }
-    }
-
-    void checkNodes(PersistentStore store, NodeBPlus p) {
-
-        if (p.isLeaf) {
-            if (p.isData
-                    || p.getParent(store)!=null
-                    || p.getPointers().length>0)  {
-                System.out.print("broken index - node type");
-            }
-        }
-
-        else if (p.isData) {
-            if (p.isLeaf|| p.getParent(store) == null
-                    || p.getKeys().length > 0
-                    || p.getPointers().length > 0) {
-                System.out.print("broken index - node type");
-            }
-
-            NodeBPlus parent = p.getParent(store);
-            boolean flag = false;
-            for (int i=0; i<parent.getKeys().length; i++) {
-                if (p.equals(parent.getKeys()[i])) {
-                    flag = true;
-                    break;
-                }
-            }
-            if (!flag) {
-                System.out.print("broken index - no parent");
-            }
-        }
-
-        else {
-            if (p.getKeys().length + 1 != p.getPointers().length) {
-                System.out.print("broken index - no match in key & pointer");
-            }
-        }
-    }
 
     /**
      * Insert a node into the index
