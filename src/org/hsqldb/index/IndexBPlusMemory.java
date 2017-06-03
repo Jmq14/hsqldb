@@ -71,7 +71,6 @@
 package org.hsqldb.index;
 
 import org.hsqldb.Constraint;
-import org.hsqldb.HsqlNameManager;
 import org.hsqldb.HsqlNameManager.HsqlName;
 import org.hsqldb.Row;
 import org.hsqldb.RowBPlus;
@@ -80,8 +79,6 @@ import org.hsqldb.Table;
 import org.hsqldb.TableBase;
 import org.hsqldb.error.Error;
 import org.hsqldb.error.ErrorCode;
-import org.hsqldb.lib.ArraySort;
-import org.hsqldb.lib.ArrayUtil;
 import org.hsqldb.persist.PersistentStore;
 import org.hsqldb.types.Type;
 import java.util.Stack;
@@ -264,9 +261,12 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                 while (true) {
                     if (stack.isEmpty()) {
-                        // root case
+
+                        // n is root
                         NodeBPlus root = new NodeBPlus(false, false);
+
                         root.addKeys(key);
+
                         root.addPointers(n);
                         root.addPointers(newNode);
 
@@ -458,7 +458,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                 if (n == root && x == n.getKeys()[i]) {
 
-                    n.removeKeys(x, i);
+                    n.removeKeys(i);
                     return;
 
                 } else if (x == n.getKeys()[i]) {
@@ -473,6 +473,373 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                 if (n.getKeys().length-1 >= n.nodeSize / 2) {
                     n.removeKeys(x);
+
+                    NodeBPlus parent = stack.peek();
+                    for (int i=0; i<parent.getKeys().length; i++) {
+
+                        if (searchCompare(parent.getKeys()[i].getRow(store),
+                                session, x.getRow(store)) == 0) {
+
+                            parent.replaceKeys(n.getKeys()[0], i);
+                            break;
+
+                        }
+                    }
+                }
+
+                else {  // combining nodes
+
+                    NodeBPlus parent = stack.peek();
+
+                    // Determine whether the next node comes from
+                    // the same parent. If not, borrow elements from it.
+                    int deter = sameParent(n, parent);
+
+
+                    if (deter == 1) {
+                        // borrow from the next leaf node
+
+                        n.removeKeys(x);
+
+                        NodeBPlus key = n.getNextPage().removeKeys(0);
+                        NodeBPlus pointer = n.getNextPage().removePointers(0);
+                        n.addKeys(key);
+                        n.addPointers(pointer);
+
+                        for (int i = 0; i < parent.getKeys().length; i++) {
+
+                            if (searchCompare(parent.getKeys()[i].getRow(store),
+                                    session, key.getRow(store)) == 0) {
+
+                                parent.replaceKeys(n.getNextPage().getKeys()[0], i);
+                                break;
+                            }
+                        }
+
+                        for (int i = 0; i < parent.getKeys().length; i++) {
+
+                            if (searchCompare(parent.getKeys()[i].getRow(store),
+                                    session, x.getRow(store)) == 0) {
+
+                                parent.replaceKeys(n.getKeys()[0], i);
+                                break;
+                            }
+                        }
+
+                        return;
+
+                    }
+
+                    else if (deter == 2) {
+                        // borrow from the previous node
+
+                        n.removeKeys(x);
+
+                        NodeBPlus key =
+                                n.getLastPage().removeKeys(n.getLastPage().getKeys().length-1);
+                        NodeBPlus pointer =
+                                n.getLastPage().removePointers(n.getLastPage().getPointers().length-1);
+                        n.addKeys(key, 0);
+                        n.addPointers(pointer, 0);
+
+                        for (int i = 0; i < parent.getKeys().length; i++) {
+
+                            if (searchCompare(parent.getKeys()[i].getRow(store),
+                                    session, key.getRow(store)) == 0) {
+
+                                parent.replaceKeys(
+                                        n.getLastPage().getKeys()[n.getLastPage().getKeys().length-1],
+                                        i);
+                                break;
+                            }
+                        }
+
+                        for (int i = 0; i < parent.getKeys().length; i++) {
+
+                            if (searchCompare(parent.getKeys()[i].getRow(store),
+                                    session, x.getRow(store)) == 0) {
+
+                                parent.replaceKeys(n.getKeys()[0], i);
+                                break;
+                            }
+                        }
+
+                        return;
+
+                    }
+
+                    else {
+                        // merging to an internal node
+                        boolean prevB = true;
+
+                        if (x == n.getKeys()[0]) {
+                            prevB = false;
+                        }
+
+                        n.removeKeys(x);
+
+                        int tempKey = 0;
+                        int tempPointer = 0;
+
+                        // if the merging with the next node
+                        // then copy all elements of current node to the next node
+                        // move the first element from the next node to parent
+                        if (canMeargeNext(n, parent)) {
+                            NodeBPlus next = n.getNextPage();
+
+                            if (n.getLastPage() != null) {
+                                n.getLastPage().setNextPage(next);
+                            }
+
+                            if (next != null) {
+                                next.setLastPage(n.getLastPage());
+                            }
+                            else {
+                                return;
+                            }
+
+                            n.setLastPage(null);
+                            n.setNextPage(null);
+
+                            for (int i=n.getKeys().length; i>=0; i--){
+                                next.addKeys(n.getKeys()[i], 0);
+                            }
+
+                            for (int i=n.getPointers().length; i>=0; i--){
+                                next.addPointers(n.getPointers()[i], 0);
+                            }
+
+                            for (int i = 0; i < parent.getKeys().length; i++) {
+
+                                if (searchCompare(parent.getKeys()[i].getRow(store), session,
+                                        next.getKeys()[n.getKeys().length].getRow(store)) == 0) {
+
+                                    tempKey = i;
+                                    tempPointer = i;
+
+                                    break;
+                                }
+                            }
+                            if (tempKey > 0 && parent.getKeys()[tempKey - 1] == x) {
+                                parent.replaceKeys(next.getKeys()[0], tempKey-1);
+                            }
+
+                        }
+
+                        // merging with the last node
+                        else {
+
+                            NodeBPlus prev = n.getLastPage();
+                            if (prev != null) {
+                                prev.setNextPage(n.getNextPage());
+                            }
+                            else {
+                                return;
+                            }
+
+                            if (n.getNextPage() != null) {
+                                n.getNextPage().setLastPage(prev);
+                            }
+
+                            n.setNextPage(null);
+                            n.setLastPage(null);
+
+                            for (int i=0; i<n.getKeys().length; i++){
+                                prev.addKeys(n.getKeys()[i]);
+                            }
+
+                            for (int i=0; i<n.getPointers().length; i++) {
+                                prev.addPointers(n.getPointers()[i]);
+                            }
+
+                            if (prevB) {
+                                for (int i = 0; i < parent.getKeys().length; i++) {
+
+                                    if (searchCompare(parent.getKeys()[i].getRow(store), session,
+                                            n.getKeys()[0].getRow(store)) == 0) {
+
+                                        tempKey = i;
+                                        tempPointer = i + 1;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                for (int i = 0; i < parent.getKeys().length; i++) {
+                                    if (searchCompare(parent.getKeys()[i].getRow(store), session,
+                                            x.getRow(store)) == 0) {
+
+                                        tempKey = i;
+                                        tempPointer = i + 1;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            boolean finished = false;
+                            do {
+                                // if we get root
+                                if (stack.isEmpty()) {
+
+                                    root.removeKeys(tempKey);
+                                    root.removePointers(tempPointer);
+                                    finished = true;
+
+                                }
+                                else {
+
+                                    n = stack.pop();
+
+                                    //try borrowing from the sibling
+                                    if (n.getKeys().length >= 2) {
+
+                                        n.removeKeys(tempKey);
+                                        n.removePointers(tempPointer);
+
+                                        finished = true;
+
+                                    } else {
+                                        // if the root has single sibling
+                                        // the tree height will decrease
+
+                                        if (n == root) {
+
+                                            n.removeKeys(tempKey);
+                                            n.removePointers(tempPointer);
+
+                                            if (n.getPointers().length == 1) {
+                                                root = n.getPointers()[0];
+                                                store.setAccessor(this, root);
+                                            }
+
+                                            finished = true;
+
+                                        } else {
+
+                                            n.removeKeys(tempKey);
+                                            n.removePointers(tempPointer);
+
+                                            parent = stack.peek();
+                                            deter = sameParent2(n, parent);
+
+                                            // borrowing from next internal node
+
+                                            if (deter == 1) {
+
+                                                int index = -1;
+
+                                                for (int i = 0; i < parent.getPointers().length; i++) {
+                                                    if (parent.getPointers()[i] == n.getNextPage()) {
+                                                        index = i;
+                                                        break;
+                                                    }
+                                                }
+
+                                                n.addKeys(parent.removeKeys(index - 1));
+                                                n.addPointers(n.getNextPage().removePointers(0));
+
+                                                parent.addKeys(n.getNextPage().removeKeys(0), index-1);
+
+                                                finished = true;
+                                            }
+
+                                            // boorwing form prev internal node
+                                            else if (deter == 2) {
+
+                                                int index = -1;
+
+                                                for (int i = 0; i < parent.getPointers().length; i++) {
+                                                    if (parent.getPointers()[i] == n) {
+
+                                                        index = i;
+                                                        break;
+                                                    }
+                                                }
+                                                n.addKeys(parent.removeKeys(index - 1), 0);
+                                                n.addPointers(n.getLastPage().removePointers(
+                                                        n.getLastPage().getPointers().length - 1),
+                                                        0);
+
+                                                parent.addKeys(n.getLastPage().removeKeys(
+                                                        n.getLastPage().getKeys().length - 1),
+                                                        index-1);
+
+                                                finished = true;
+                                            } else {
+
+                                                // merging two internal nodes
+                                                if (canMeargeNext(parent, n)) {
+
+                                                    for (int i = 0; i < parent.getPointers().length; i++) {
+
+                                                        if (n == parent.getPointers()[i]) {
+                                                            tempKey = i;
+                                                            tempPointer = i;
+                                                            break;
+                                                        }
+                                                    }
+
+                                                    NodeBPlus next = n.getNextPage();
+
+                                                    if (n.getLastPage() != null) {
+                                                        n.getLastPage().setNextPage(next);
+                                                    }
+                                                    if (next != null) {
+                                                        next.setLastPage(n.getLastPage());
+                                                    }
+                                                    else {
+                                                        return;
+                                                    }
+
+                                                    next.addKeys(parent.getKeys()[tempKey], 0);
+
+                                                    for (int i=n.getKeys().length; i>=0; i--){
+                                                        next.addKeys(n.getKeys()[i], 0);
+                                                    }
+
+                                                    for (int i=n.getPointers().length; i>=0; i--){
+                                                        next.addPointers(n.getPointers()[i], 0);
+                                                    }
+
+
+
+                                                } else {
+                                                    for (int i = 0; i < parent.getPointers().length; i++) {
+
+                                                        if (n == parent.getPointers()[i]) {
+
+                                                            tempKey = i - 1;
+                                                            tempPointer = i;
+                                                            break;
+                                                        }
+                                                    }
+
+                                                    prev = n.getLastPage();
+                                                    if (prev != null) {
+                                                        prev.setNextPage(n.getNextPage());
+                                                    }
+
+                                                    if (n.getNextPage() != null) {
+                                                        n.getNextPage().setLastPage(prev);
+                                                    }
+
+                                                    prev.addKeys(parent.getKeys()[tempKey]);
+
+                                                    for (int i=0; i<n.getKeys().length; i++){
+                                                        prev.addKeys(n.getKeys()[i]);
+                                                    }
+
+                                                    for (int i=0; i<n.getPointers().length; i++) {
+                                                        prev.addPointers(n.getPointers()[i]);
+                                                    }
+
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } while (!finished);
+                        }
+                    }
                 }
             }
 
@@ -484,6 +851,76 @@ public class IndexBPlusMemory extends IndexBPlus {
         }
 
 
+    }
+
+    private int sameParent(NodeBPlus n, NodeBPlus parent) {
+
+        boolean _next = canMeargeNext(n, parent);
+        boolean _prev = canMergePrev(n, parent);
+
+        NodeBPlus next = n.getNextPage();
+        NodeBPlus prev = n.getLastPage();
+
+        if (_next && next.getKeys().length - 1 >= n.nodeSize / 2.0) {
+            return 1;
+        } else if (_prev && prev.getKeys().length - 1 >= n.nodeSize / 2.0) {
+            return 2;
+        } else {
+            return 0;
+        }
+    }
+
+    private int sameParent2(NodeBPlus n, NodeBPlus parent) {
+
+        boolean _next = canMeargeNext(n, parent);
+        boolean _prev = canMergePrev(n, parent);
+
+        NodeBPlus next = n.getNextPage();
+        NodeBPlus prev = n.getLastPage();
+
+        if (next != null && _next && next.getKeys().length - 1 >= 1) {
+            return 1;
+        } else if (prev != null && _prev && prev.getKeys().length- 1 >= 1) {
+            return 2;
+        } else {
+            return 0;
+        }
+    }
+
+    private boolean canMeargeNext(NodeBPlus n, NodeBPlus parent) {
+
+        boolean _next  = false;
+        NodeBPlus next = n.getNextPage();
+        int i;
+
+        if (next != null) {
+            for (i = 0; i < parent.getPointers().length; i++) {
+                if (parent.getPointers()[i] == next) {
+                    _next = true;
+                    break;
+                }
+            }
+        }
+
+        return _next;
+    }
+
+    private boolean canMergePrev(NodeBPlus n, NodeBPlus parent) {
+
+        boolean _prev  = false;
+        NodeBPlus prev = n.getLastPage();
+        int i;
+
+        if (prev != null) {
+            for (i = 0; i < parent.getPointers().length; i++) {
+                if (parent.getPointers()[i] == prev) {
+                    _prev = true;
+                    break;
+                }
+            }
+        }
+
+        return _prev;
     }
 
     //NodeBPlus next(PersistentStore store, NodeBPlus x) {

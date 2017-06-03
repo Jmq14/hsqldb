@@ -344,18 +344,33 @@ public class NodeBPlus implements CachedObject {
         keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, key, this.keys.length, 1);
     }
 
-    public void removeKeys(NodeBPlus key, int pos) {
-        if (keys[pos] != null && keys[pos] == key) {
-            keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, null, pos, -1);
-        }
+    public void addKeys(NodeBPlus key, int pos) {
+        keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, key, pos, 1);
     }
 
-    public void removeKeys(NodeBPlus key) {
+    public NodeBPlus removeKeys(int pos) {
+
+        NodeBPlus node = keys[pos];
+
+        if (node != null) {
+            keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, null, pos, -1);
+        }
+
+        return node;
+    }
+
+    public NodeBPlus removeKeys(NodeBPlus key) {
         for (int i = 0; i < keys.length; i++) {
             if (keys[i] == key) {
-                removeKeys(key, i);
-                break;
+                return removeKeys(i);
             }
+        }
+        return key;
+    }
+
+    public void replaceKeys(NodeBPlus key, int pos) {
+        if (pos < keys.length) {
+            keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, key, pos, 0);
         }
     }
 
@@ -373,10 +388,17 @@ public class NodeBPlus implements CachedObject {
         pointers = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.pointers, pointer, this.pointers.length, 1);
     }
 
-    public void removePointers(NodeBPlus pointer, int pos) {
-        if (pointers[pos] != null && pointers[pos] == pointer) {
+    public void addPointers(NodeBPlus pointer, int pos){
+        pointers = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.pointers, pointer, pos, 1);
+    }
+
+    public NodeBPlus removePointers( int pos) {
+
+        NodeBPlus pointer = pointers[pos];
+        if (pointer != null ) {
             pointers = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.pointers, null, pos, -1);
         }
+        return pointer;
     }
 
     public void setNextPage(NodeBPlus n) {
