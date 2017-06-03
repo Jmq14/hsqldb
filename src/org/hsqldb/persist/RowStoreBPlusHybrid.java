@@ -373,6 +373,7 @@ public class RowStoreBPlusHybrid extends RowStoreBPlus implements PersistentStor
 
     public final void changeToDiskTable(Session session) {
 
+        System.out.println("change to disk table");
         cache =
             ((PersistentStoreCollectionSession) manager).getSessionDataCache();
 

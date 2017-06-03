@@ -1808,16 +1808,24 @@ public class IndexBPlus implements Index {
                             rowdata, rowColMap, fieldCount);
                 }
 
-                for (int j=0; j<x.getKeys().length-1; j++) {
+                for (int j=0; j<x.getKeys().length; j++) {
 
                     key = x.getKeys()[j];
                     currentRow = nextRow;
                     currentCompare = nextCompare;
 
-                    nextRow = x.getKeys()[j+1].getRow(store);
-                    if (fieldCount > 0) {
-                        nextCompare = compareRowNonUnique(session, nextRow.getData(),
-                                rowdata, rowColMap, fieldCount);
+                    if (j == x.getKeys().length-1) {
+
+                        nextRow = null;
+
+                    }
+                    else {
+
+                        nextRow = x.getKeys()[j + 1].getRow(store);
+                        if (fieldCount > 0) {
+                            nextCompare = compareRowNonUnique(session, nextRow.getData(),
+                                    rowdata, rowColMap, fieldCount);
+                        }
                     }
 
                     if (currentCompare == 0 ) {
@@ -1900,9 +1908,14 @@ public class IndexBPlus implements Index {
                         break;
 
                     } else if (currentCompare < 0 ) {
-                        if (nextCompare > 0) {
+                        if (nextRow!=null && nextCompare > 0) {
                             n = x.getPointers()[j+1];
                             break;
+
+                        } else if (nextRow == null) {
+                            n = x.getPointers()[j+1];
+                            break;
+
                         }
                     }
                     else if (currentCompare > 0) {
@@ -2030,6 +2043,8 @@ public class IndexBPlus implements Index {
             }
 
             return result;
+        } catch (RuntimeException e) {
+            throw e;
         } finally {
             readLock.unlock();
         }
