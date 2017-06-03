@@ -28,7 +28,6 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 package org.hsqldb.sample;
 
 import java.sql.Connection;
@@ -38,166 +37,201 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Date;
+
 /**
- * Title:        Testdb
- * Description:  simple hello world db example of a
- *               standalone persistent db application
+ * Title: Testdb Description: TPC-H test for HSQLDB
  *
- *               every time it runs it adds four more rows to sample_table
- *               it does a query and prints the results to standard out
+ * Require all data prepared in prefix folder
  *
- * Author: Karl Meissner karl@meissnersd.com
+ * Author: Yoohee jlmhkwang@gmail.com
  */
 public class Testdb {
 
-    Connection conn;                                                //our connnection to the db - presist for life of program
+	static String prefix = "/Users/Cyclops-THSS/Documents/2017Spring/计算机系统软件(2)/TPC-H/data/";
+	static String[] tables = { "region", "nation", "supplier", "customer", "part", "partsupp", "orders", "lineitem" };
 
-    // we dont want this garbage collected until we are done
-    public Testdb(String db_file_name_prefix) throws Exception {    // note more general exception
+	Connection conn; // our connnection to the db - presist for life of program
 
-        // Load the HSQL Database Engine JDBC driver
-        // hsqldb.jar should be in the class path or made part of the current jar
-        Class.forName("org.hsqldb.jdbc.JDBCDriver");
+	long start;
 
-        // connect to the database.   This will load the db files and start the
-        // database if it is not alread running.
-        // db_file_name_prefix is used to open or create files that hold the state
-        // of the db.
-        // It can contain directory names relative to the
-        // current working directory
-        conn = DriverManager.getConnection("jdbc:hsqldb:"
-                                           + db_file_name_prefix,    // filenames
-                                           "SA",                     // username
-                                           "");                      // password
-    }
+	// we dont want this garbage collected until we are done
+	public Testdb(String db_file_name_prefix) throws Exception {
+		// Load the HSQL Database Engine JDBC driver
+		Class.forName("org.hsqldb.jdbc.JDBCDriver");
+		conn = DriverManager.getConnection("jdbc:hsqldb:" + db_file_name_prefix, // filenames
+				"SA", // username
+				""); // password
+	}
 
-    public void shutdown() throws SQLException {
+	public void shutdown() throws SQLException {
+		Statement st = conn.createStatement();
+		st.execute("SHUTDOWN");
+		conn.close();
+	}
 
-        Statement st = conn.createStatement();
+	// use for SQL command SELECT
+	public synchronized void query(String expression, int id) throws SQLException {
 
-        // db writes out to files and performs clean shuts down
-        // otherwise there will be an unclean shutdown
-        // when program ends
-        st.execute("SHUTDOWN");
-        conn.close();    // if there are no other open connection
-    }
+		Statement st = null;
+		ResultSet rs = null;
 
-//use for SQL command SELECT
-    public synchronized void query(String expression) throws SQLException {
+		st = conn.createStatement(); // statement objects can be reused with
 
-        Statement st = null;
-        ResultSet rs = null;
+		// repeated calls to execute but we
+		// choose to make a new one each time
+		rs = st.executeQuery(expression); // run the query
 
-        st = conn.createStatement();         // statement objects can be reused with
+		// do something with the result set.
+		dump(rs, id);
+		st.close();
+	}
 
-        // repeated calls to execute but we
-        // choose to make a new one each time
-        rs = st.executeQuery(expression);    // run the query
+	// use for SQL commands CREATE, DROP, INSERT and UPDATE
+	public synchronized void update(String expression) throws SQLException {
 
-        // do something with the result set.
-        dump(rs);
-        st.close();    // NOTE!! if you close a statement the associated ResultSet is
+		Statement st = null;
 
-        // closed too
-        // so you should copy the contents to some other object.
-        // the result set is invalidated also  if you recycle an Statement
-        // and try to execute some other query before the result set has been
-        // completely examined.
-    }
+		st = conn.createStatement(); // statements
 
-//use for SQL commands CREATE, DROP, INSERT and UPDATE
-    public synchronized void update(String expression) throws SQLException {
+		int i = st.executeUpdate(expression); // run the query
 
-        Statement st = null;
+		if (i == -1) {
+			System.out.println("db error : " + expression);
+		}
 
-        st = conn.createStatement();    // statements
+		st.close();
+	} // void update()
 
-        int i = st.executeUpdate(expression);    // run the query
+	public static void dump(ResultSet rs, int id) throws SQLException {
 
-        if (i == -1) {
-            System.out.println("db error : " + expression);
-        }
+		// the order of the rows in a cursor
+		// are implementation dependent unless you use the SQL ORDER statement
+		ResultSetMetaData meta = rs.getMetaData();
+		int colmax = meta.getColumnCount();
+		int i;
+		Object o = null;
 
-        st.close();
-    }    // void update()
+		// the result set is a cursor into the data. You can only
+		// point to one row at a time
+		// assume we are pointing to BEFORE the first row
+		// rs.next() points to next row and returns true
+		// or false if there is no next row, which breaks the loop
+		try {
+			PrintWriter writer = new PrintWriter("r" + id + ".txt", "UTF-8");
+			for (; rs.next();) {
+				for (i = 0; i < colmax; ++i) {
+					o = rs.getObject(i + 1); // Is SQL the first column is
+					// indexed with 1 not 0
+					writer.print(o.toString() + " ");
+				}
+				writer.println(" ");
+			}
+			writer.close();
+		} catch (IOException ex) {
+			ex.printStackTrace();
+		}
+	} // void dump( ResultSet rs )
 
-    public static void dump(ResultSet rs) throws SQLException {
+	public void load_lines(String file) throws Exception {
+		InputStream is = new FileInputStream(prefix + file);
+		BufferedReader reader = new BufferedReader(new InputStreamReader(is));
+		String str = null;
+		while (true) {
+			str = reader.readLine();
+			if (str != null)
+				update(str);
+			else
+				break;
+		}
+		is.close();
+	} // void load_lines( String file )
 
-        // the order of the rows in a cursor
-        // are implementation dependent unless you use the SQL ORDER statement
-        ResultSetMetaData meta   = rs.getMetaData();
-        int               colmax = meta.getColumnCount();
-        int               i;
-        Object            o = null;
+	public void load_query(String file, int id) throws Exception {
+		InputStream is = new FileInputStream(prefix + file);
+		String str = new String(Files.readAllBytes(Paths.get(prefix + file)));
+		query(str, id);
+		is.close();
+	} // void load_query( String file )
 
-        // the result set is a cursor into the data.  You can only
-        // point to one row at a time
-        // assume we are pointing to BEFORE the first row
-        // rs.next() points to next row and returns true
-        // or false if there is no next row, which breaks the loop
-        for (; rs.next(); ) {
-            for (i = 0; i < colmax; ++i) {
-                o = rs.getObject(i + 1);    // Is SQL the first column is indexed
+	public void load_update(String file) throws Exception {
+		InputStream is = new FileInputStream(prefix + file);
+		String str = new String(Files.readAllBytes(Paths.get(prefix + file)));
+		update(str);
+		is.close();
+	} // void load_update( String file )
 
-                // with 1 not 0
-                System.out.print(o.toString() + " ");
-            }
+	public void settimer() {
+		start = System.currentTimeMillis();
+	}
 
-            System.out.println(" ");
-        }
-    }                                       //void dump( ResultSet rs )
+	public void report(String info) {
+		long sep = System.currentTimeMillis() - start;
+		System.out.println(info + ":" + sep);
+	}
 
-    public static void main(String[] args) {
+	public static void main(String[] args) {
 
-        Testdb db = null;
+		Testdb db = null;
 
-        try {
-            db = new Testdb("db_file");
-        } catch (Exception ex1) {
-            ex1.printStackTrace();    // could not start db
+		try {
+			db = new Testdb("test");
+		} catch (Exception ex1) {
+			ex1.printStackTrace(); // could not start db
+			return; // bye bye
+		}
 
-            return;                   // bye bye
-        }
+		try {
+			db.settimer();
+			// Create table
+			db.load_update("dss.ddl");
+			db.load_lines("dss.ri");
+			// Insert data
+			for (String s : tables) {
+				db.load_lines(s + ".sql");
+			}
+			// Load test finished
+			db.report("Load");
+			// RF1
+			db.settimer();
+			db.load_lines("RF1.sql");
+			db.report("RF1");
+			// Queries
+			for (int i = 1; i < 23; i++) {
+				if (i == 7 || i == 21)
+					continue;
+				if (i == 15) {
+					db.load_update("q15.1.sql");
+					db.load_query("q15.2.sql", i);
+					db.load_update("q15.3.sql");
+				} else {
+					db.settimer();
+					db.load_query("q" + i + ".sql", i);
+				}
+				db.report("Q" + i);
+			}
+			// RF2
+			db.settimer();
+			db.load_lines("RF2.sql");
+			db.report("RF2");
+		} catch (Exception ex2) {
+			ex2.printStackTrace();
+			return;
+		}
 
-        try {
-
-            //make an empty table
-            //
-            // by declaring the id column IDENTITY, the db will automatically
-            // generate unique values for new rows- useful for row keys
-            db.update(
-                "CREATE TABLE sample_table ( id INTEGER IDENTITY, str_col VARCHAR(256), num_col INTEGER)");
-        } catch (SQLException ex2) {
-
-            //ignore
-            //ex2.printStackTrace();  // second time we run program
-            //  should throw execption since table
-            // already there
-            //
-            // this will have no effect on the db
-        }
-
-        try {
-
-            // add some rows - will create duplicates if run more then once
-            // the id column is automatically generated
-            db.update(
-                "INSERT INTO sample_table(str_col,num_col) VALUES('Ford', 100)");
-            db.update(
-                "INSERT INTO sample_table(str_col,num_col) VALUES('Toyota', 200)");
-            db.update(
-                "INSERT INTO sample_table(str_col,num_col) VALUES('Honda', 300)");
-            db.update(
-                "INSERT INTO sample_table(str_col,num_col) VALUES('GM', 400)");
-
-            // do a query
-            db.query("SELECT * FROM sample_table WHERE num_col < 250");
-
-            // at end of program
-            db.shutdown();
-        } catch (SQLException ex3) {
-            ex3.printStackTrace();
-        }
-    }    // main()
-}    // class Testdb
-
+		try {
+			db.shutdown();
+		} catch (SQLException ex3) {
+			ex3.printStackTrace();
+		}
+	} // main()
+} // class Testdb
