@@ -115,9 +115,9 @@ public class NodeBPlus implements CachedObject {
     public NodeBPlus   nNext;    // node of next index (nNext==null || nNext.iId=iId+1)
 
     //
-    protected NodeBPlus   nLeft;
-    protected NodeBPlus   nRight;
-    protected NodeBPlus   nParent;
+    protected NodeBPlus   nLeft    = null;
+    protected NodeBPlus   nRight   = null;
+    protected NodeBPlus   nParent  = null;
 
     protected NodeBPlus[] keys     = new NodeBPlus[]{};
     protected NodeBPlus[] pointers = new NodeBPlus[]{};
@@ -234,6 +234,7 @@ public class NodeBPlus implements CachedObject {
         if (isLeaf) {
             // leaf node
             keys = (NodeBPlus[])ArrayUtil.toAdjustedArray(keys, key, pos, 1);
+            key.setParent(store, this);
         }
         else {
             // interior node

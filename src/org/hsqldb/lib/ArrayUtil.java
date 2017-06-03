@@ -660,7 +660,7 @@ public class ArrayUtil {
     }
 
     /**
-     * Returns an index into arra (or -1) where the character is in the
+     * Returns an index into array (or -1) where the character is in the
      * byteSet byte array.
      */
     public static int findIn(byte[] arra, int start, int limit,

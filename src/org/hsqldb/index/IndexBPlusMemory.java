@@ -194,7 +194,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
             if (n == null) {         // empty tree
 
-                n = newLeafNode(x);
+                n = newLeafNode(store, x);
                 store.setAccessor(this, n);   // root
 
                 return;
@@ -247,6 +247,9 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                 // copying the rest of temp node in new node
                 newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
+                for (int i=0; i<newNode.getKeys().length; i++){
+                    newNode.getKeys()[i].setParent(store, newNode);
+                }
 
                 // set next/last leaf node
                 if (n.getNextPage() != null) {
@@ -364,12 +367,14 @@ public class IndexBPlusMemory extends IndexBPlus {
         int compare = searchCompare(currentRow, session, keyRow);
         if (compare < 0) {
             pos = 0;
+            return node.set(store, key, pointer, pos);
         }
 
         currentRow = node.getKeys()[node.getKeys().length-1].row;
         compare = searchCompare(currentRow, session, keyRow);
         if (compare >= 0) {
             pos = node.getKeys().length;
+            return node.set(store, key, pointer, pos);
         }
 
         Row nextRow = node.getKeys()[0].row;
@@ -379,10 +384,9 @@ public class IndexBPlusMemory extends IndexBPlus {
             if (searchCompare(currentRow, session, keyRow) >= 0 &&
                     searchCompare(nextRow, session, keyRow) < 0) {
                 pos = i+1;
+                return node.set(store, key, pointer, pos);
             }
         }
-
-        node.set(store, key, pointer, pos);
         return node;
     }
 
@@ -390,11 +394,12 @@ public class IndexBPlusMemory extends IndexBPlus {
     /**
      * Initialize a leaf node.
      */
-    private NodeBPlus newLeafNode(NodeBPlus leaf) {
-        NodeBPlus x = new NodeBPlus();
-        x.keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(
-                x.getKeys(), leaf, 0, 1);
-        return x;
+    private NodeBPlus newLeafNode(PersistentStore store, NodeBPlus x) {
+        NodeBPlus n = new NodeBPlus();
+        n.addKeys(x);
+        x.setParent(store, n);
+
+        return n;
     }
 
     void delete(PersistentStore store, NodeBPlus x) {

@@ -459,8 +459,10 @@ public class IndexBPlus implements Index {
             }
 
             while (true) {
-                temp  = next(store, node, depth, probeDepth, depths);
-                depth = depths[0];
+//                temp  = next(store, node, depth, probeDepth, depths);
+//                depth = depths[0];
+//                ??? how to define the search cost in B Plus Tree???
+                temp = next(store, node);
 
                 if (temp == null) {
                     break;
@@ -578,7 +580,7 @@ public class IndexBPlus implements Index {
      * Removes all links between memory nodes
      */
     public void unlinkNodes(NodeBPlus primaryRoot) {
-//
+        System.out.println("unlinkNodes");
 //        writeLock.lock();
 //
 //        try {
@@ -1274,10 +1276,16 @@ public class IndexBPlus implements Index {
             NodeBPlus x = getAccessor(store);
             NodeBPlus l = x;
 
-            while (l != null) {
+            while (l != null && !l.isLeaf) {
                 x = l;
-                l = x.getLeft(store);
+                l = x.getPointers()[0];
             }
+
+            if (l == null) {
+                return emptyIterator;
+            }
+
+            x = l.getKeys()[0];
 
             while (session != null && x != null) {
                 Row row = x.getRow(store);
@@ -1310,10 +1318,16 @@ public class IndexBPlus implements Index {
             NodeBPlus x = getAccessor(store);
             NodeBPlus l = x;
 
-            while (l != null) {
+            while (l != null && !l.isLeaf) {
                 x = l;
-                l = x.getLeft(store);
+                l = x.getPointers()[0];
             }
+
+            if (l == null) {
+                return emptyIterator;
+            }
+
+            x = l.getKeys()[0];
 
             if (x == null) {
                 return emptyIterator;
@@ -1339,10 +1353,16 @@ public class IndexBPlus implements Index {
             NodeBPlus x = getAccessor(store);
             NodeBPlus l = x;
 
-            while (l != null) {
+            while (!l.isLeaf) {
                 x = l;
-                l = x.getRight(store);
+                l = x.getPointers()[x.getPointers().length-1];
             }
+
+            if (l == null) {
+                return emptyIterator;
+            }
+
+            x = l.getKeys()[l.getKeys().length-1];
 
             while (session != null && x != null) {
                 Row row = x.getRow(store);
@@ -1444,26 +1464,26 @@ public class IndexBPlus implements Index {
 
         x = row.getNode(position);
 
-        NodeBPlus temp = x.getRight(store);
+        NodeBPlus temp = x.getParent(store);
 
         if (temp != null) {
-            x    = temp;
-            temp = x.getLeft(store);
-
-            while (temp != null) {
-                x    = temp;
-                temp = x.getLeft(store);
+            int i = ArrayUtil.find(temp.getKeys(), x);
+            if (i < 0) {
+                System.out.println("wrong parent!");
+                return x;
+                // error
             }
 
-            return x;
-        }
+            if (i < temp.getKeys().length - 1) {
+                return temp.getKeys()[i + 1];
+            }
 
-        temp = x;
-        x    = x.getParent(store);
-
-        while (x != null && x.isRight(temp)) {
-            temp = x;
-            x    = x.getParent(store);
+            temp = temp.getNextPage();
+            if (temp != null) {
+                return temp.getKeys()[0];
+            } else {
+                return null;
+            }
         }
 
         return x;
@@ -1526,28 +1546,27 @@ public class IndexBPlus implements Index {
 
         x = row.getNode(position);
 
-        NodeBPlus temp = x.getLeft(store);
+        NodeBPlus temp = x.getParent(store);
 
         if (temp != null) {
-            x    = temp;
-            temp = x.getRight(store);
-
-            while (temp != null) {
-                x    = temp;
-                temp = x.getRight(store);
+            int i = ArrayUtil.find(temp.getKeys(), x);
+            if (i < 0) {
+                System.out.println("wrong parent!");
+                return x;
+                // error
             }
 
-            return x;
+            if (i > 0) {
+                return temp.getKeys()[i - 1];
+            }
+
+            temp = temp.getLastPage();
+            if (temp != null) {
+                return temp.getKeys()[temp.getKeys().length-1];
+            } else {
+                return null;
+            }
         }
-
-        temp = x;
-        x    = x.getParent(store);
-
-        while (x != null && x.isLeft(temp)) {
-            temp = x;
-            x    = x.getParent(store);
-        }
-
         return x;
     }
 
@@ -1648,8 +1667,12 @@ public class IndexBPlus implements Index {
         try {
             NodeBPlus x          = getAccessor(store);
             NodeBPlus n          = null;
+            NodeBPlus key        = null;
             NodeBPlus result     = null;
             Row     currentRow = null;
+            Row     nextRow    = null;
+            int     currentCompare = 0;
+            int     nextCompare    = 0;
 
             if (compareType != OpTypes.EQUAL
                     && compareType != OpTypes.IS_NULL) {
@@ -1661,96 +1684,120 @@ public class IndexBPlus implements Index {
                 }
             }
 
-            while (x != null) {
-                currentRow = x.getRow(store);
+            while (x != null && !x.isLeaf) {
+                currentCompare = 0;
+                nextCompare    = 0;
 
-                int i = 0;
+                nextRow = x.getKeys()[0].getRow(store);
 
                 if (fieldCount > 0) {
-                    i = compareRowNonUnique(session, currentRow.getData(),
-                                            rowdata, rowColMap, fieldCount);
+                    nextCompare = compareRowNonUnique(session, currentRow.getData(),
+                            rowdata, rowColMap, fieldCount);
                 }
 
-                if (i == 0) {
-                    switch (compareType) {
+                for (int j=0; j<x.getKeys().length-1; j++) {
 
-                        case OpTypes.IS_NULL :
-                        case OpTypes.EQUAL : {
-                            result = x;
+                    key = x.getKeys()[j];
+                    currentRow = nextRow;
+                    currentCompare = nextCompare;
 
-                            if (reversed) {
-                                n = x.getRight(store);
-                            } else {
-                                n = x.getLeft(store);
-                            }
-
-                            break;
-                        }
-                        case OpTypes.NOT :
-                        case OpTypes.GREATER : {
-                            i = compareObject(session, currentRow.getData(),
-                                              rowdata, rowColMap, fieldCount,
-                                              compareType);
-
-                            if (i <= 0) {
-                                n = x.getRight(store);
-                            } else {
-                                result = x;
-                                n      = x.getLeft(store);
-                            }
-
-                            break;
-                        }
-                        case OpTypes.GREATER_EQUAL_PRE :
-                        case OpTypes.GREATER_EQUAL : {
-                            i = compareObject(session, currentRow.getData(),
-                                              rowdata, rowColMap, fieldCount,
-                                              compareType);
-
-                            if (i < 0) {
-                                n = x.getRight(store);
-                            } else {
-                                result = x;
-                                n      = x.getLeft(store);
-                            }
-
-                            break;
-                        }
-                        case OpTypes.SMALLER : {
-                            i = compareObject(session, currentRow.getData(),
-                                              rowdata, rowColMap, fieldCount,
-                                              compareType);
-
-                            if (i < 0) {
-                                result = x;
-                                n      = x.getRight(store);
-                            } else {
-                                n = x.getLeft(store);
-                            }
-
-                            break;
-                        }
-                        case OpTypes.SMALLER_EQUAL : {
-                            i = compareObject(session, currentRow.getData(),
-                                              rowdata, rowColMap, fieldCount,
-                                              compareType);
-
-                            if (i <= 0) {
-                                result = x;
-                                n      = x.getRight(store);
-                            } else {
-                                n = x.getLeft(store);
-                            }
-
-                            break;
-                        }
-                        default :
-                            Error.runtimeError(ErrorCode.U_S0500, "Index");
+                    nextRow = x.getKeys()[j+1].getRow(store);
+                    if (fieldCount > 0) {
+                        nextCompare = compareRowNonUnique(session, nextRow.getData(),
+                                rowdata, rowColMap, fieldCount);
                     }
-                } else if (i < 0) {
-                    n = x.getRight(store);
-                } else if (i > 0) {
-                    n = x.getLeft(store);
+
+                    if (currentCompare == 0 ) {
+                        switch (compareType) {
+
+                            case OpTypes.IS_NULL :
+                            case OpTypes.EQUAL : {
+                                result = key;
+
+                                if (reversed) {
+                                    n = x.getPointers()[j+1];
+                                } else {
+                                    n = x.getPointers()[j];
+                                }
+
+                                break;
+                            }
+                            case OpTypes.NOT :
+                            case OpTypes.GREATER : {
+                                currentCompare = compareObject(session, currentRow.getData(),
+                                        rowdata, rowColMap, fieldCount,
+                                        compareType);
+
+                                if (currentCompare <= 0) {
+                                    n = x.getPointers()[j+1];
+                                } else {
+                                    result = key;
+                                    n = x.getPointers()[j];
+                                }
+
+                                break;
+                            }
+                            case OpTypes.GREATER_EQUAL_PRE :
+                            case OpTypes.GREATER_EQUAL : {
+                                currentCompare = compareObject(session, currentRow.getData(),
+                                        rowdata, rowColMap, fieldCount,
+                                        compareType);
+
+                                if (currentCompare < 0) {
+                                    n = x.getPointers()[j+1];
+                                } else {
+                                    result = key;
+                                    n = x.getPointers()[j];
+                                }
+
+                                break;
+                            }
+                            case OpTypes.SMALLER : {
+                                currentCompare = compareObject(session, currentRow.getData(),
+                                        rowdata, rowColMap, fieldCount,
+                                        compareType);
+
+                                if (currentCompare < 0) {
+                                    result = key;
+                                    n = x.getPointers()[j+1];
+                                } else {
+                                    n = x.getPointers()[j];
+                                }
+
+                                break;
+                            }
+                            case OpTypes.SMALLER_EQUAL : {
+                                currentCompare = compareObject(session, currentRow.getData(),
+                                        rowdata, rowColMap, fieldCount,
+                                        compareType);
+
+                                if (compareType <= 0) {
+                                    result = key;
+                                    n = x.getPointers()[j+1];
+                                } else {
+                                    n = x.getPointers()[j];
+                                }
+
+                                break;
+                            }
+                            default :
+                                Error.runtimeError(ErrorCode.U_S0500, "Index");
+                        }
+
+                        break;
+
+                    } else if (currentCompare < 0 ) {
+                        if (nextCompare > 0) {
+                            n = x.getPointers()[j+1];
+                            break;
+                        }
+                    }
+                    else if (currentCompare > 0) {
+                        n = x.getPointers()[j];
+                        break;
+                    }
+
+
                 }
 
                 if (n == null) {
@@ -1760,7 +1807,83 @@ public class IndexBPlus implements Index {
                 x = n;
             }
 
-            // MVCC 190
+
+            // in leaf node
+            for (int j=0; j<x.getKeys().length-1; j++) {
+
+                key = x.getKeys()[j];
+                currentRow = nextRow;
+                currentCompare = nextCompare;
+
+                nextRow = x.getKeys()[j + 1].getRow(store);
+                if (fieldCount > 0) {
+                    nextCompare = compareRowNonUnique(session, nextRow.getData(),
+                            rowdata, rowColMap, fieldCount);
+                }
+
+                if (currentCompare == 0) {
+                    switch (compareType) {
+
+                        case OpTypes.IS_NULL:
+                        case OpTypes.EQUAL: {
+                            result = key;
+
+                            break;
+                        }
+                        case OpTypes.NOT:
+                        case OpTypes.GREATER: {
+                            currentCompare = compareObject(session, currentRow.getData(),
+                                    rowdata, rowColMap, fieldCount,
+                                    compareType);
+
+                            if (currentCompare > 0) {
+                                result = key;
+                            }
+
+                            break;
+                        }
+                        case OpTypes.GREATER_EQUAL_PRE:
+                        case OpTypes.GREATER_EQUAL: {
+                            currentCompare = compareObject(session, currentRow.getData(),
+                                    rowdata, rowColMap, fieldCount,
+                                    compareType);
+
+                            if (currentCompare >= 0) {
+                                result = key;
+                            }
+
+                            break;
+                        }
+                        case OpTypes.SMALLER: {
+                            currentCompare = compareObject(session, currentRow.getData(),
+                                    rowdata, rowColMap, fieldCount,
+                                    compareType);
+
+                            if (currentCompare < 0) {
+                                result = key;
+                            }
+
+                            break;
+                        }
+                        case OpTypes.SMALLER_EQUAL: {
+                            currentCompare = compareObject(session, currentRow.getData(),
+                                    rowdata, rowColMap, fieldCount,
+                                    compareType);
+
+                            if (compareType <= 0) {
+                                result = key;
+                            }
+
+                            break;
+                        }
+                        default:
+                            Error.runtimeError(ErrorCode.U_S0500, "Index");
+                    }
+                }
+            }
+
+
+                    // MVCC 190
             if (session == null) {
                 return result;
             }
@@ -1799,40 +1922,89 @@ public class IndexBPlus implements Index {
         }
     }
 
+    /**
+     * Find the first different node after/before the given one.
+     * @param session
+     * @param store
+     * @param node
+     * @param fieldCount
+     * @param reversed  false for searching afterwards
+     * @return
+     */
     NodeBPlus findDistinctNode(Session session, PersistentStore store,
                              NodeBPlus node, int fieldCount, boolean reversed) {
 
         readLock.lock();
 
+
         try {
-            NodeBPlus  x          = getAccessor(store);
-            NodeBPlus  n          = null;
-            NodeBPlus  result     = null;
-            Row      currentRow = null;
+            NodeBPlus x          = getAccessor(store);
+            NodeBPlus n          = null;
+            NodeBPlus key        = null;
+            NodeBPlus result     = null;
             Object[] rowData    = node.getData(store);
+            Row     currentRow = null;
+            Row     nextRow    = null;
+            int     currentCompare = 0;
+            int     nextCompare    = 0;
 
-            while (x != null) {
-                currentRow = x.getRow(store);
+            while (x != null && !x.isLeaf) {
+                currentCompare = 0;
+                nextCompare    = 0;
 
-                int i = 0;
+                nextRow = x.getKeys()[0].getRow(store);
 
-                i = compareRowNonUnique(session, currentRow.getData(),
-                                        rowData, colIndex, fieldCount);
+                if (fieldCount > 0) {
+                    nextCompare = compareRowNonUnique(session, currentRow.getData(),
+                            rowData, colIndex, fieldCount);
+                }
 
-                if (reversed) {
-                    if (i < 0) {
-                        result = x;
-                        n      = x.getRight(store);
-                    } else {
-                        n = x.getLeft(store);
+                for (int j=0; j<x.getKeys().length-1; j++) {
+
+                    key = x.getKeys()[j];
+                    currentRow = nextRow;
+                    currentCompare = nextCompare;
+
+                    nextRow = x.getKeys()[j+1].getRow(store);
+                    if (fieldCount > 0) {
+                        nextCompare = compareRowNonUnique(session, nextRow.getData(),
+                                rowData, colIndex, fieldCount);
                     }
-                } else {
-                    if (i <= 0) {
-                        n = x.getRight(store);
-                    } else {
-                        result = x;
-                        n      = x.getLeft(store);
+
+                    if (currentCompare == 0 ) {
+
+                        if (reversed) {
+                            n = x.getPointers()[j+1];
+                        } else {
+                            n = x.getPointers()[j];
+                        }
+
+                        break;
+
                     }
+                    else if (currentCompare < 0 ) {
+
+                        if (reversed){
+                            result = key;
+                        }
+
+                        if (nextCompare > 0) {
+                            n = x.getPointers()[j+1];
+                            break;
+                        }
+                    }
+                    else if (currentCompare > 0) {
+
+                        if (!reversed) {
+                            result = key;
+                        }
+
+                        n = x.getPointers()[j];
+
+                        break;
+                    }
+
+
                 }
 
                 if (n == null) {
@@ -1840,6 +2012,50 @@ public class IndexBPlus implements Index {
                 }
 
                 x = n;
+            }
+
+
+            // in leaf node
+            if (x != null) {
+
+                currentCompare = 0;
+
+                if (reversed) {
+
+                    for (int j = x.getKeys().length - 1; j >= 0; j--) {
+
+                        key = x.getKeys()[j];
+                        currentRow = key.getRow(store);
+
+                        if (fieldCount > 0) {
+                            currentCompare = compareRowNonUnique(session, currentRow.getData(),
+                                    rowData, colIndex, fieldCount);
+                        }
+
+                        if (currentCompare < 0) {
+                            result = key;
+                            break;
+                        }
+
+                    }
+                } else {
+
+                    for (int j = 0; j < x.getKeys().length; j++) {
+
+                        key = x.getKeys()[j];
+                        currentRow = key.getRow(store);
+
+                        if (fieldCount > 0) {
+                            currentCompare = compareRowNonUnique(session, currentRow.getData(),
+                                    rowData, colIndex, fieldCount);
+                        }
+
+                        if (currentCompare > 0) {
+                            result = key;
+                            break;
+                        }
+                    }
+                }
             }
 
             // MVCC 190
