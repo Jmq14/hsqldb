@@ -354,6 +354,14 @@ public class IndexBPlusMemory extends IndexBPlus {
         return compare;
     }
 
+    public int searchCompareForDelete(Row currentRow, Session session, Row row) {
+        final Object[] rowData       = row.getData();
+        boolean        compareRowId  = !isUnique || hasNulls(session, rowData);
+        return compareRowForInsertOrDelete(session, row,
+                currentRow,
+                compareRowId, 0);
+    }
+
     private NodeBPlus insertNode(Session session, PersistentStore store,
                                  NodeBPlus node, NodeBPlus key, NodeBPlus pointer) {
 //        RowComparator comparator = new RowComparator(session);
@@ -414,6 +422,8 @@ public class IndexBPlusMemory extends IndexBPlus {
 
         int compare = 0;
 
+        writeLock.lock();
+
         try {
             root = getAccessor(store);
             n = root;
@@ -426,14 +436,14 @@ public class IndexBPlusMemory extends IndexBPlus {
                 stack.push(n);
 
                 Row currentRow = n.getKeys()[0].row;
-                compare = searchCompare(currentRow, session, row);
+                compare = searchCompareForDelete(currentRow, session, row);
                 if (compare < 0) {
                     n = n.getPointers()[0];
                     continue;
                 }
 
                 currentRow = n.getKeys()[n.getKeys().length-1].row;
-                compare = searchCompare(currentRow, session, row);
+                compare = searchCompareForDelete(currentRow, session, row);
                 if (compare >= 0) {
                     n = n.getPointers()[n.getPointers().length-1];
                     continue;
@@ -443,8 +453,8 @@ public class IndexBPlusMemory extends IndexBPlus {
                 for (int i=0; i < n.getKeys().length-1; i++) {
                     currentRow = nextRow;
                     nextRow = n.getKeys()[i+1].row;
-                    if (searchCompare(currentRow, session, row) >= 0 &&
-                            searchCompare(nextRow, session, row) < 0) {
+                    if (searchCompareForDelete(currentRow, session, row) >= 0 &&
+                            searchCompareForDelete(nextRow, session, row) < 0) {
                         n = n.getPointers()[i+1];
                     }
                 }
@@ -477,7 +487,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                     NodeBPlus parent = stack.peek();
                     for (int i=0; i<parent.getKeys().length; i++) {
 
-                        if (searchCompare(parent.getKeys()[i].getRow(store),
+                        if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                 session, x.getRow(store)) == 0) {
 
                             parent.replaceKeys(n.getKeys()[0], i);
@@ -508,7 +518,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                         for (int i = 0; i < parent.getKeys().length; i++) {
 
-                            if (searchCompare(parent.getKeys()[i].getRow(store),
+                            if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                     session, key.getRow(store)) == 0) {
 
                                 parent.replaceKeys(n.getNextPage().getKeys()[0], i);
@@ -518,7 +528,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                         for (int i = 0; i < parent.getKeys().length; i++) {
 
-                            if (searchCompare(parent.getKeys()[i].getRow(store),
+                            if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                     session, x.getRow(store)) == 0) {
 
                                 parent.replaceKeys(n.getKeys()[0], i);
@@ -544,7 +554,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                         for (int i = 0; i < parent.getKeys().length; i++) {
 
-                            if (searchCompare(parent.getKeys()[i].getRow(store),
+                            if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                     session, key.getRow(store)) == 0) {
 
                                 parent.replaceKeys(
@@ -556,7 +566,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                         for (int i = 0; i < parent.getKeys().length; i++) {
 
-                            if (searchCompare(parent.getKeys()[i].getRow(store),
+                            if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                     session, x.getRow(store)) == 0) {
 
                                 parent.replaceKeys(n.getKeys()[0], i);
@@ -611,7 +621,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                             for (int i = 0; i < parent.getKeys().length; i++) {
 
-                                if (searchCompare(parent.getKeys()[i].getRow(store), session,
+                                if (searchCompareForDelete(parent.getKeys()[i].getRow(store), session,
                                         next.getKeys()[n.getKeys().length].getRow(store)) == 0) {
 
                                     tempKey = i;
@@ -655,7 +665,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                             if (prevB) {
                                 for (int i = 0; i < parent.getKeys().length; i++) {
 
-                                    if (searchCompare(parent.getKeys()[i].getRow(store), session,
+                                    if (searchCompareForDelete(parent.getKeys()[i].getRow(store), session,
                                             n.getKeys()[0].getRow(store)) == 0) {
 
                                         tempKey = i;
@@ -665,7 +675,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                                 }
                             } else {
                                 for (int i = 0; i < parent.getKeys().length; i++) {
-                                    if (searchCompare(parent.getKeys()[i].getRow(store), session,
+                                    if (searchCompareForDelete(parent.getKeys()[i].getRow(store), session,
                                             x.getRow(store)) == 0) {
 
                                         tempKey = i;
@@ -846,6 +856,8 @@ public class IndexBPlusMemory extends IndexBPlus {
 
 
 
+        } catch (RuntimeException e) {
+            throw e;
         } finally {
             writeLock.unlock();
         }
