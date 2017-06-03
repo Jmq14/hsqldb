@@ -239,7 +239,7 @@ public class NodeBPlus implements CachedObject {
         else {
             // interior node
             keys = (NodeBPlus[])ArrayUtil.toAdjustedArray(keys, key, pos, 1);
-            pointers = (NodeBPlus[])ArrayUtil.toAdjustedArray(pointer, pointer, pos+1, 1);
+            pointers = (NodeBPlus[])ArrayUtil.toAdjustedArray(pointers, pointer, pos+1, 1);
         }
         return this;
     }
@@ -332,10 +332,11 @@ public class NodeBPlus implements CachedObject {
     }
 
     public void setKeys(NodeBPlus[] keys) {
-        ArrayUtil.copyArray(keys, this.keys, keys.length);
+        setKeys(keys, 0, keys.length);
     }
 
     public void setKeys(NodeBPlus[] keys, int start, int end) {
+        this.keys = (NodeBPlus[]) ArrayUtil.resizeArrayIfDifferent(this.keys, end - start);
         ArrayUtil.copyArray(keys, this.keys, start, end);
     }
 
@@ -343,17 +344,39 @@ public class NodeBPlus implements CachedObject {
         keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, key, this.keys.length, 1);
     }
 
+    public void removeKeys(NodeBPlus key, int pos) {
+        if (keys[pos] != null && keys[pos] == key) {
+            keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, null, pos, -1);
+        }
+    }
+
+    public void removeKeys(NodeBPlus key) {
+        for (int i = 0; i < keys.length; i++) {
+            if (keys[i] == key) {
+                removeKeys(key, i);
+                break;
+            }
+        }
+    }
+
     public void setPointers(NodeBPlus[] pointers) {
-        ArrayUtil.copyArray(pointers, this.pointers, pointers.length);
+        setPointers(pointers, 0, pointers.length);
 //        this.pointers = (NodeBPlus[]) ArrayUtil.duplicateArray(pointers);
     }
 
     public void setPointers(NodeBPlus[] pointers, int start, int end) {
+        this.pointers = (NodeBPlus[]) ArrayUtil.resizeArrayIfDifferent(this.pointers, end - start);
         ArrayUtil.copyArray(pointers, this.pointers, start, end);
     }
 
     public void addPointers(NodeBPlus pointer){
         pointers = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.pointers, pointer, this.pointers.length, 1);
+    }
+
+    public void removePointers(NodeBPlus pointer, int pos) {
+        if (pointers[pos] != null && pointers[pos] == pointer) {
+            pointers = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.pointers, null, pos, -1);
+        }
     }
 
     public void setNextPage(NodeBPlus n) {

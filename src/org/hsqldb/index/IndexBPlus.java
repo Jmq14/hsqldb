@@ -70,6 +70,7 @@
 
 package org.hsqldb.index;
 
+import java.util.Stack;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -143,7 +144,7 @@ public class IndexBPlus implements Index {
     int                      position;
     private IndexUse[]       asArray;
 
-    protected NodeBPlus      root;       // B plus tree root node
+//    protected NodeBPlus      root;       // B plus tree root node
 
 
     //
@@ -191,7 +192,7 @@ public class IndexBPlus implements Index {
         this.colCheck      = table.getNewColumnCheckList();
         this.asArray = new IndexUse[]{ new IndexUse(this, colIndex.length) };
 
-        this.root          = null;
+//        this.root          = null;
 
         ArrayUtil.intIndexesToBooleanArray(colIndex, colCheck);
 
@@ -886,78 +887,190 @@ public class IndexBPlus implements Index {
      */
     public void insert(Session session, PersistentStore store, Row row) {
 
-        NodeBPlus n;
-        NodeBPlus x;
-        boolean isleft       = true;
-        int     compare      = -1;
-        boolean compareRowId = !isUnique || hasNulls(session, row.getData());
+        NodeBPlus        n;
+        NodeBPlus        x;
+        int              compare = -1;
+        Stack<NodeBPlus> stack = new Stack<NodeBPlus>();
 
         writeLock.lock();
-        store.writeLock();
 
         try {
             n = getAccessor(store);
-            x = n;
+            x = ((RowBPlus) row).getNode(position);
 
-            if (n == null) {
-                store.setAccessor(this, ((RowBPlus) row).getNode(position));
+            if (n == null) {         // empty tree
+
+                n = newLeafNode(store, x);
+                store.setAccessor(this, n);   // root
 
                 return;
             }
 
-            while (true) {
-                Row currentRow = n.getRow(store);
+            while (!n.isLeaf) {
+                // searching...
+                stack.push(n);
 
-                compare = compareRowForInsertOrDelete(session, row,
-                                                      currentRow,
-                                                      compareRowId, 0);
-
-                // after the first match and check, all compares are with row id
-                if (compare == 0 && session != null && !compareRowId
-                        && session.database.txManager.isMVRows()) {
-                    if (!isEqualReadable(session, store, n)) {
-                        compareRowId = true;
-                        compare = compareRowForInsertOrDelete(session, row,
-                                                              currentRow,
-                                                              compareRowId,
-                                                              colIndex.length);
-                    }
+                Row currentRow = n.getKeys()[0].row;
+                compare = searchCompare(currentRow, session, row);
+                if (compare < 0) {
+                    n = n.getPointers()[0];
+                    continue;
                 }
 
-                if (compare == 0) {
-                    Constraint c = null;
-
-                    if (isConstraint) {
-                        c = ((Table) table).getUniqueConstraintForIndex(this);
-                    }
-
-                    if (c == null) {
-                        throw Error.error(ErrorCode.X_23505,
-                                          name.statementName);
-                    } else {
-                        throw c.getException(row.getData());
-                    }
+                currentRow = n.getKeys()[n.getKeys().length-1].row;
+                compare = searchCompare(currentRow, session, row);
+                if (compare >= 0) {
+                    n = n.getPointers()[n.getPointers().length-1];
+                    continue;
                 }
 
-                isleft = compare < 0;
-                x      = n;
-                n      = x.child(store, isleft);
-
-                if (n == null) {
-                    break;
+                Row nextRow = n.getKeys()[0].row;
+                for (int i=0; i < n.getKeys().length-1; i++) {
+                    currentRow = nextRow;
+                    nextRow = n.getKeys()[i+1].row;
+                    if (searchCompare(currentRow, session, row) >= 0 &&
+                            searchCompare(nextRow, session, row) < 0) {
+                        n = n.getPointers()[i+1];
+                    }
                 }
             }
 
-            x = x.set(store, isleft, ((RowBPlus) row).getNode(position));
 
-            balance(store, x, isleft);
-        } catch (RuntimeException e) {
-            throw e;
+            if (n.getKeys().length < n.nodeSize) {  // if node has not been full
+                n = insertNode(session, store, n, x, null);
+            } else {                                // else: split the node
+                // copying all current node contents in temp node then insert the new element on it
+                NodeBPlus temp = new NodeBPlus();
+                temp.setKeys(n.getKeys());
+                temp.setPointers(n.getPointers());
+                temp = insertNode(session, store, temp, x, null);
+
+                NodeBPlus newNode = new NodeBPlus();
+                int j = (n.getKeys().length + 1) / 2;
+
+                //take the first half of the temp nde in current node
+                n.setKeys(temp.getKeys(), 0, j);
+
+                // copying the rest of temp node in new node
+                newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
+                for (int i=0; i<newNode.getKeys().length; i++){
+                    newNode.getKeys()[i].setParent(store, newNode);
+                }
+
+                // set next/last leaf node
+                if (n.getNextPage() != null) {
+                    n.getNextPage().setLastPage(newNode);
+                }
+                newNode.setNextPage(n.getNextPage());
+                newNode.setLastPage(n);
+                n.setNextPage(newNode);
+
+                // key that will be inserting into parent node
+                NodeBPlus key = temp.getKeys()[j];
+
+                while (true) {
+                    if (stack.isEmpty()) {
+                        // root case
+                        NodeBPlus root = new NodeBPlus(false, false);
+                        root.addKeys(key);
+                        root.addPointers(n);
+                        root.addPointers(newNode);
+
+                        store.setAccessor(this, root);
+                        break;
+                    }
+                    else {
+                        // parent case
+                        n = stack.pop();
+
+                        if (n.getKeys().length < n.nodeSize) {
+                            n = insertNode(session, store, n, key, newNode);
+                            break;
+                        }
+                        else {
+                            // splitting one internal nodes
+                            // copying them into new node and insert new elements in temp node
+                            // then dividing it into current node and new node
+                            temp.setLeaf(false);
+                            temp.setKeys(n.getKeys());
+                            temp.setPointers(n.getPointers());
+                            temp = insertNode(session, store, temp, key, newNode);
+
+                            j = temp.getPointers().length / 2;
+
+                            n.setKeys(temp.getKeys(), 0, j-1);
+                            n.setPointers(temp.getPointers(), 0, j);
+
+                            newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
+                            newNode.setPointers(temp.getPointers(), j, temp.getPointers().length);
+
+                            if (n.getNextPage() != null) {
+                                n.getNextPage().setLastPage(newNode);
+                            }
+                            newNode.setNextPage(n.getNextPage());
+                            newNode.setLastPage(n);
+                            n.setNextPage(newNode);
+
+                            key = temp.getKeys()[j-1];
+                        }
+
+                    }
+                }
+
+
+
+            }
         } finally {
-            store.writeUnlock();
             writeLock.unlock();
         }
     }
+
+    private NodeBPlus insertNode(Session session, PersistentStore store,
+                                 NodeBPlus node, NodeBPlus key, NodeBPlus pointer) {
+//        RowComparator comparator = new RowComparator(session);
+//        ArrayUtil.toAdjustedArray(leaf.keys, data, 0, 1);
+//        ArraySort.sort(leaf.keys, 0, leaf.keys.length, comparator);
+
+        int pos = 0;
+
+        Row keyRow = key.row;
+        Row currentRow = node.getKeys()[0].row;
+
+        int compare = searchCompare(currentRow, session, keyRow);
+        if (compare < 0) {
+            pos = 0;
+            return node.set(store, key, pointer, pos);
+        }
+
+        currentRow = node.getKeys()[node.getKeys().length-1].row;
+        compare = searchCompare(currentRow, session, keyRow);
+        if (compare >= 0) {
+            pos = node.getKeys().length;
+            return node.set(store, key, pointer, pos);
+        }
+
+        Row nextRow = node.getKeys()[0].row;
+        for (int i=0; i < node.getKeys().length-1; i++) {
+            currentRow = nextRow;
+            nextRow = node.getKeys()[i+1].row;
+            if (searchCompare(currentRow, session, keyRow) >= 0 &&
+                    searchCompare(nextRow, session, keyRow) < 0) {
+                pos = i+1;
+                return node.set(store, key, pointer, pos);
+            }
+        }
+        return node;
+    }
+
+    private NodeBPlus newLeafNode(PersistentStore store, NodeBPlus x) {
+
+        NodeBPlus n = new NodeBPlus();
+        n.addKeys(x);
+        x.setParent(store, n);
+
+        return n;
+    }
+
 
     public void delete(Session session, PersistentStore store, Row row) {
 
@@ -1691,7 +1804,7 @@ public class IndexBPlus implements Index {
                 nextRow = x.getKeys()[0].getRow(store);
 
                 if (fieldCount > 0) {
-                    nextCompare = compareRowNonUnique(session, currentRow.getData(),
+                    nextCompare = compareRowNonUnique(session, nextRow.getData(),
                             rowdata, rowColMap, fieldCount);
                 }
 

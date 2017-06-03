@@ -342,11 +342,11 @@ public class RowStoreBPlusHybrid extends RowStoreBPlus implements PersistentStor
         if (node == null) {
             return null;
         }
-
-        RowBPlus row = (RowBPlus) get(node.getRow(this), false);
-
-        node                            = row.getNode(key.getPosition());
-        accessorList[key.getPosition()] = node;
+//
+//        RowBPlus row = (RowBPlus) get(node.getRow(this), false);
+//
+//        node                            = row.getNode(key.getPosition());
+//        accessorList[key.getPosition()] = node;
 
         return node;
     }

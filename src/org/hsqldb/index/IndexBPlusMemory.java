@@ -240,7 +240,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                 temp = insertNode(session, store, temp, x, null);
 
                 NodeBPlus newNode = new NodeBPlus();
-                int j = n.getPointers().length / 2;
+                int j = (n.getKeys().length + 1) / 2;
 
                 //take the first half of the temp nde in current node
                 n.setKeys(temp.getKeys(), 0, j);
@@ -359,6 +359,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 //        RowComparator comparator = new RowComparator(session);
 //        ArrayUtil.toAdjustedArray(leaf.keys, data, 0, 1);
 //        ArraySort.sort(leaf.keys, 0, leaf.keys.length, comparator);
+
         int pos = 0;
 
         Row keyRow = key.row;
@@ -395,6 +396,7 @@ public class IndexBPlusMemory extends IndexBPlus {
      * Initialize a leaf node.
      */
     private NodeBPlus newLeafNode(PersistentStore store, NodeBPlus x) {
+
         NodeBPlus n = new NodeBPlus();
         n.addKeys(x);
         x.setParent(store, n);
@@ -402,11 +404,89 @@ public class IndexBPlusMemory extends IndexBPlus {
         return n;
     }
 
-    void delete(PersistentStore store, NodeBPlus x) {
+    void delete(Session session, PersistentStore store, NodeBPlus x) {
+
+        Stack<NodeBPlus> stack = new Stack<NodeBPlus>();
+        NodeBPlus n;
+        NodeBPlus root;
+        Row       row = x.getRow(store);
+
+
+        int compare = 0;
+
+        try {
+            root = getAccessor(store);
+            n = root;
+
+            if (n == null) {         // empty tree
+                return;
+            }
+
+            while (!n.isLeaf) {
+                stack.push(n);
+
+                Row currentRow = n.getKeys()[0].row;
+                compare = searchCompare(currentRow, session, row);
+                if (compare < 0) {
+                    n = n.getPointers()[0];
+                    continue;
+                }
+
+                currentRow = n.getKeys()[n.getKeys().length-1].row;
+                compare = searchCompare(currentRow, session, row);
+                if (compare >= 0) {
+                    n = n.getPointers()[n.getPointers().length-1];
+                    continue;
+                }
+
+                Row nextRow = n.getKeys()[0].row;
+                for (int i=0; i < n.getKeys().length-1; i++) {
+                    currentRow = nextRow;
+                    nextRow = n.getKeys()[i+1].row;
+                    if (searchCompare(currentRow, session, row) >= 0 &&
+                            searchCompare(nextRow, session, row) < 0) {
+                        n = n.getPointers()[i+1];
+                    }
+                }
+            }
+
+            // n is a leaf node
+
+            boolean flag = false;
+
+            for (int i = 0; i < n.getKeys().length; i++) {
+
+                if (n == root && x == n.getKeys()[i]) {
+
+                    n.removeKeys(x, i);
+                    return;
+
+                } else if (x == n.getKeys()[i]) {
+
+                    flag = true;
+                    break;
+
+                }
+            }
+
+            if (flag) {
+
+                if (n.getKeys().length-1 >= n.nodeSize / 2) {
+                    n.removeKeys(x);
+                }
+            }
+
+
+
+
+        } finally {
+            writeLock.unlock();
+        }
+
 
     }
 
-    NodeBPlus next(PersistentStore store, NodeBPlus x) {
+    //NodeBPlus next(PersistentStore store, NodeBPlus x) {
 
 //        NodeBPlus r = x.nRight;
 //
@@ -432,10 +512,10 @@ public class IndexBPlusMemory extends IndexBPlus {
 //            x  = x.nParent;
 //        }
 //
-        return x;
-    }
+//        return x;
+//    }
 
-    NodeBPlus last(PersistentStore store, NodeBPlus x) {
+    //NodeBPlus last(PersistentStore store, NodeBPlus x) {
 
 //        if (x == null) {
 //            return null;
@@ -465,8 +545,8 @@ public class IndexBPlusMemory extends IndexBPlus {
 //            x  = x.nParent;
 //        }
 //
-        return x;
-    }
+//        return x;
+//    }
 
 //    /**
 //     * Balances part of the tree after an alteration to the index.
