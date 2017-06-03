@@ -75,7 +75,6 @@ import org.hsqldb.RowBPlus;
 import org.hsqldb.RowBPlusDisk;
 import org.hsqldb.lib.ArrayUtil;
 import org.hsqldb.lib.LongLookup;
-import org.hsqldb.lib.ObjectComparator;
 import org.hsqldb.persist.CachedObject;
 import org.hsqldb.persist.PersistentStore;
 import org.hsqldb.rowio.RowOutputInterface;
@@ -107,7 +106,6 @@ import javax.xml.soap.Node;
 public class NodeBPlus implements CachedObject {
 
     static final int NO_POS = RowBPlusDisk.NO_POS;
-    public int       iBalance;
     public boolean   isLeaf;
     public boolean   isData;        // Note: data node is a corresponding node to a single row
                                     // in oder to organize the data.
@@ -115,8 +113,6 @@ public class NodeBPlus implements CachedObject {
     public NodeBPlus   nNext;    // node of next index (nNext==null || nNext.iId=iId+1)
 
     //
-    protected NodeBPlus   nLeft    = null;
-    protected NodeBPlus   nRight   = null;
     protected NodeBPlus   nParent  = null;
 
     protected NodeBPlus[] keys     = new NodeBPlus[]{};
@@ -156,50 +152,12 @@ public class NodeBPlus implements CachedObject {
         ArrayUtil.clearArray(ArrayUtil.CLASS_CODE_OBJECT, pointers, 0, pointers.length);
         nextPage = null;
         lastPage = null;
-        iBalance = 0;
-        nLeft    = nRight = nParent = null;
+        nParent = null;
     }
 
-    NodeBPlus getLeft(PersistentStore store) {
-        return nLeft;
-    }
-
-    NodeBPlus setLeft(PersistentStore persistentStore, NodeBPlus n) {
-
-        nLeft = n;
-
-        return this;
-    }
-
-    public int getBalance(PersistentStore store) {
-        return iBalance;
-    }
-
-    boolean isLeft(NodeBPlus node) {
-        return nLeft == node;
-    }
-
-    boolean isRight(NodeBPlus node) {
-        return nRight == node;
-    }
-
-    NodeBPlus getRight(PersistentStore persistentStore) {
-        return nRight;
-    }
-
-    NodeBPlus setRight(PersistentStore persistentStore, NodeBPlus n) {
-
-        nRight = n;
-
-        return this;
-    }
 
     NodeBPlus getParent(PersistentStore store) {
         return nParent;
-    }
-
-    boolean isRoot(PersistentStore store) {
-        return nParent == null;
     }
 
     NodeBPlus setParent(PersistentStore persistentStore, NodeBPlus n) {
@@ -207,27 +165,6 @@ public class NodeBPlus implements CachedObject {
         nParent = n;
 
         return this;
-    }
-
-    public NodeBPlus setBalance(PersistentStore store, int b) {
-
-        iBalance = b;
-
-        return this;
-    }
-
-    boolean isFromLeft(PersistentStore store) {
-
-        if (nParent == null) {
-            return true;
-        }
-
-        return this == nParent.nLeft;
-    }
-
-    public NodeBPlus child(PersistentStore store, boolean isleft) {
-        return isleft ? getLeft(store)
-                      : getRight(store);
     }
 
     public NodeBPlus set(PersistentStore store, NodeBPlus key, NodeBPlus pointer, int pos) {
@@ -244,20 +181,6 @@ public class NodeBPlus implements CachedObject {
         return this;
     }
 
-    public NodeBPlus set(PersistentStore store, boolean isLeft, NodeBPlus n) {
-
-        if (isLeft) {
-            nLeft = n;
-        } else {
-            nRight = n;
-        }
-
-        if (n != null) {
-            n.nParent = this;
-        }
-
-        return this;
-    }
 
     public void replace(PersistentStore store, Index index, NodeBPlus n) {
 
