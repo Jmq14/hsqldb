@@ -322,6 +322,12 @@ public class IndexBPlusMemory extends IndexBPlus {
 
         int pos = 0;
 
+        if (node == null) {
+            node.addKeys(key);
+            key.setParent(store, node);
+            return node;
+        }
+
         Row keyRow = key.row;
         Row currentRow = node.getKeys()[0].row;
 
