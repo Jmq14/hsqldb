@@ -2247,17 +2247,17 @@ public class IndexBPlus implements Index {
                 x = n;
             }
 
+            if (x == null) {
+                return null;
+            }
 
             // in leaf node
-            for (int j=0; j<x.getKeys().length-1; j++) {
+            for (int j=0; j<x.getKeys().length; j++) {
 
                 key = x.getKeys()[j];
-                currentRow = nextRow;
-                currentCompare = nextCompare;
-
-                nextRow = x.getKeys()[j + 1].getRow(store);
+                currentRow = x.getKeys()[j].getRow(store);
                 if (fieldCount > 0) {
-                    nextCompare = compareRowNonUnique(session, nextRow.getData(),
+                    currentCompare = compareRowNonUnique(session, currentRow.getData(),
                             rowdata, rowColMap, fieldCount);
                 }
 
