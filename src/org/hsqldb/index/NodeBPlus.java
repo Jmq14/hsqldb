@@ -254,45 +254,71 @@ public class NodeBPlus implements CachedObject {
         this.isLeaf = isLeaf;
     }
 
-    public void setKeys(NodeBPlus[] keys) {
-        setKeys(keys, 0, keys.length);
+    public void setKeys(PersistentStore store, NodeBPlus[] keys) {
+        setKeys(store, keys, 0, keys.length);
     }
 
-    public void setKeys(NodeBPlus[] keys, int start, int end) {
+    public void setKeys(PersistentStore store, NodeBPlus[] keys, int start, int end) {
+        if (isLeaf) {
+            for (int i = 0 ; i < this.keys.length; i++) {
+                this.keys[i].setParent(store, null);
+            }
+            for (int i = start; i < end; i++) {
+                keys[i].setParent(store, this);
+            }
+        }
         this.keys = (NodeBPlus[]) ArrayUtil.resizeArrayIfDifferent(this.keys, end - start);
         ArrayUtil.copyArray(keys, this.keys, start, end);
     }
 
-    public void addKeys(NodeBPlus key) {
+    public void addKeys(PersistentStore store, NodeBPlus key) {
+        if (isLeaf) {
+            key.setParent(store, this);
+        }
         keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, key, this.keys.length, 1);
     }
 
-    public void addKeys(NodeBPlus key, int pos) {
+    public void addKeys(PersistentStore store, NodeBPlus key, int pos) {
+        if (isLeaf) {
+            key.setParent(store, this);
+        }
         keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, key, pos, 1);
     }
 
-    public NodeBPlus removeKeys(int pos) {
+    public NodeBPlus removeKeys(PersistentStore store, int pos) {
+
+        if (pos >= keys.length) {
+            return null;
+        }
 
         NodeBPlus node = keys[pos];
 
         if (node != null) {
+            if (isLeaf) {
+                node.setParent(store, null);
+            }
             keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, null, pos, -1);
         }
 
         return node;
     }
 
-    public NodeBPlus removeKeys(NodeBPlus key) {
+    public NodeBPlus removeKeys(PersistentStore store, NodeBPlus key) {
         for (int i = 0; i < keys.length; i++) {
             if (keys[i] == key) {
-                return removeKeys(i);
+                return removeKeys(store, i);
             }
         }
-        return key;
+        return null;
     }
 
-    public void replaceKeys(NodeBPlus key, int pos) {
+    public void replaceKeys(PersistentStore store, NodeBPlus key, int pos) {
+
         if (pos < keys.length) {
+            if (isLeaf) {
+                keys[pos].setParent(store, null);
+                key.setParent(store, this);
+            }
             keys = (NodeBPlus[]) ArrayUtil.toAdjustedArray(this.keys, key, pos, 0);
         }
     }
@@ -373,7 +399,9 @@ public class NodeBPlus implements CachedObject {
 
     public void restore() {}
 
-    public void destroy() {}
+    public void destroy() {
+
+    }
 
     public int getRealSize(RowOutputInterface out) {
         return 0;

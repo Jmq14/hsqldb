@@ -81,6 +81,8 @@ import org.hsqldb.error.Error;
 import org.hsqldb.error.ErrorCode;
 import org.hsqldb.persist.PersistentStore;
 import org.hsqldb.types.Type;
+
+import javax.xml.soap.Node;
 import java.util.Stack;
 
 /**
@@ -184,7 +186,7 @@ public class IndexBPlusMemory extends IndexBPlus {
             } else {                                // else: split the node
                 // copying all current node contents in temp node then insert the new element on it
                 NodeBPlus temp = new NodeBPlus();
-                temp.setKeys(n.getKeys());
+                temp.setKeys(store, n.getKeys());
                 temp.setPointers(n.getPointers());
                 temp = insertNode(session, store, temp, x, null);
 
@@ -192,10 +194,10 @@ public class IndexBPlusMemory extends IndexBPlus {
                 int j = (n.getKeys().length + 1) / 2;
 
                 //take the first half of the temp nde in current node
-                n.setKeys(temp.getKeys(), 0, j);
+                n.setKeys(store, temp.getKeys(), 0, j);
 
                 // copying the rest of temp node in new node
-                newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
+                newNode.setKeys(store, temp.getKeys(), j, temp.getKeys().length);
                 for (int i=0; i<newNode.getKeys().length; i++){
                     newNode.getKeys()[i].setParent(store, newNode);
                 }
@@ -215,9 +217,9 @@ public class IndexBPlusMemory extends IndexBPlus {
                     if (stack.isEmpty()) {
 
                         // n is root
-                        NodeBPlus root = new NodeBPlus(false, false);
+                        NodeBPlus root = new NodeBPlus(false, false);  // interior node
 
-                        root.addKeys(key);
+                        root.addKeys(store, key);
 
                         root.addPointers(n);
                         root.addPointers(newNode);
@@ -238,16 +240,16 @@ public class IndexBPlusMemory extends IndexBPlus {
                             // copying them into new node and insert new elements in temp node
                             // then dividing it into current node and new node
                             temp.setLeaf(false);
-                            temp.setKeys(n.getKeys());
+                            temp.setKeys(store, n.getKeys());
                             temp.setPointers(n.getPointers());
                             temp = insertNode(session, store, temp, key, newNode);
 
                             j = temp.getPointers().length / 2;
 
-                            n.setKeys(temp.getKeys(), 0, j-1);
+                            n.setKeys(store, temp.getKeys(), 0, j-1);
                             n.setPointers(temp.getPointers(), 0, j);
 
-                            newNode.setKeys(temp.getKeys(), j, temp.getKeys().length);
+                            newNode.setKeys(store, temp.getKeys(), j, temp.getKeys().length);
                             newNode.setPointers(temp.getPointers(), j, temp.getPointers().length);
 
                             if (n.getNextPage() != null) {
@@ -323,7 +325,7 @@ public class IndexBPlusMemory extends IndexBPlus {
         int pos = 0;
 
         if (node == null) {
-            node.addKeys(key);
+            node.addKeys(store, key);
             key.setParent(store, node);
             return node;
         }
@@ -364,7 +366,7 @@ public class IndexBPlusMemory extends IndexBPlus {
     private NodeBPlus newLeafNode(PersistentStore store, NodeBPlus x) {
 
         NodeBPlus n = new NodeBPlus();
-        n.addKeys(x);
+        n.addKeys(store, x);
         x.setParent(store, n);
 
         return n;
@@ -426,7 +428,7 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                 if (n == root && x == n.getKeys()[i]) {
 
-                    n.removeKeys(i);
+                    n.removeKeys(store, i);
                     return;
 
                 } else if (x == n.getKeys()[i]) {
@@ -440,7 +442,7 @@ public class IndexBPlusMemory extends IndexBPlus {
             if (flag) {
 
                 if (n.getKeys().length-1 >= n.nodeSize / 2) {
-                    n.removeKeys(x);
+                    n.removeKeys(store, x);
 
                     NodeBPlus parent = stack.peek();
                     for (int i=0; i<parent.getKeys().length; i++) {
@@ -448,7 +450,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                         if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                 session, x.getRow(store)) == 0) {
 
-                            parent.replaceKeys(n.getKeys()[0], i);
+                            parent.replaceKeys(store, n.getKeys()[0], i);
                             break;
 
                         }
@@ -460,26 +462,25 @@ public class IndexBPlusMemory extends IndexBPlus {
                     NodeBPlus parent = stack.peek();
 
                     // Determine whether the next node comes from
-                    // the same parent. If not, borrow elements from it.
+                    // the same parent. If so, borrow elements from it.
                     int deter = sameParent(n, parent);
 
 
                     if (deter == 1) {
                         // borrow from the next leaf node
 
-                        n.removeKeys(x);
+                        n.removeKeys(store, x);
 
-                        NodeBPlus key = n.getNextPage().removeKeys(0);
-                        NodeBPlus pointer = n.getNextPage().removePointers(0);
-                        n.addKeys(key);
-                        n.addPointers(pointer);
+                        NodeBPlus key = n.getNextPage().removeKeys(store, 0);
+
+                        n.addKeys(store, key);
 
                         for (int i = 0; i < parent.getKeys().length; i++) {
 
                             if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                     session, key.getRow(store)) == 0) {
 
-                                parent.replaceKeys(n.getNextPage().getKeys()[0], i);
+                                parent.replaceKeys(store, n.getNextPage().getKeys()[0], i);
                                 break;
                             }
                         }
@@ -489,7 +490,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                             if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                     session, x.getRow(store)) == 0) {
 
-                                parent.replaceKeys(n.getKeys()[0], i);
+                                parent.replaceKeys(store, n.getKeys()[0], i);
                                 break;
                             }
                         }
@@ -499,23 +500,21 @@ public class IndexBPlusMemory extends IndexBPlus {
                     }
 
                     else if (deter == 2) {
-                        // borrow from the previous node
+                        // borrow from the previous leaf node
 
-                        n.removeKeys(x);
+                        n.removeKeys(store, x);
 
                         NodeBPlus key =
-                                n.getLastPage().removeKeys(n.getLastPage().getKeys().length-1);
-                        NodeBPlus pointer =
-                                n.getLastPage().removePointers(n.getLastPage().getPointers().length-1);
-                        n.addKeys(key, 0);
-                        n.addPointers(pointer, 0);
+                                n.getLastPage().removeKeys(store,
+                                        n.getLastPage().getKeys().length-1);
+                        n.addKeys(store, key, 0);
 
                         for (int i = 0; i < parent.getKeys().length; i++) {
 
                             if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                     session, key.getRow(store)) == 0) {
 
-                                parent.replaceKeys(
+                                parent.replaceKeys(store,
                                         n.getLastPage().getKeys()[n.getLastPage().getKeys().length-1],
                                         i);
                                 break;
@@ -527,7 +526,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                             if (searchCompareForDelete(parent.getKeys()[i].getRow(store),
                                     session, x.getRow(store)) == 0) {
 
-                                parent.replaceKeys(n.getKeys()[0], i);
+                                parent.replaceKeys(store, n.getKeys()[0], i);
                                 break;
                             }
                         }
@@ -538,13 +537,14 @@ public class IndexBPlusMemory extends IndexBPlus {
 
                     else {
                         // merging to an internal node
+
                         boolean prevB = true;
 
                         if (x == n.getKeys()[0]) {
                             prevB = false;
                         }
 
-                        n.removeKeys(x);
+                        n.removeKeys(store, x);
 
                         int tempKey = 0;
                         int tempPointer = 0;
@@ -566,21 +566,16 @@ public class IndexBPlusMemory extends IndexBPlus {
                                 return;
                             }
 
-                            n.setLastPage(null);
-                            n.setNextPage(null);
-
-                            for (int i=n.getKeys().length; i>=0; i--){
-                                next.addKeys(n.getKeys()[i], 0);
+                            for (int i=n.getKeys().length-1; i>=0; i--){
+                                next.addKeys(store, n.getKeys()[i], 0);
                             }
 
-                            for (int i=n.getPointers().length; i>=0; i--){
-                                next.addPointers(n.getPointers()[i], 0);
-                            }
+                            n.delete();
 
                             for (int i = 0; i < parent.getKeys().length; i++) {
 
                                 if (searchCompareForDelete(parent.getKeys()[i].getRow(store), session,
-                                        next.getKeys()[n.getKeys().length].getRow(store)) == 0) {
+                                        next.getKeys()[next.getKeys().length-1].getRow(store)) == 0) {
 
                                     tempKey = i;
                                     tempPointer = i;
@@ -589,7 +584,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                                 }
                             }
                             if (tempKey > 0 && parent.getKeys()[tempKey - 1] == x) {
-                                parent.replaceKeys(next.getKeys()[0], tempKey-1);
+                                parent.replaceKeys(store, next.getKeys()[0], tempKey-1);
                             }
 
                         }
@@ -600,8 +595,7 @@ public class IndexBPlusMemory extends IndexBPlus {
                             NodeBPlus prev = n.getLastPage();
                             if (prev != null) {
                                 prev.setNextPage(n.getNextPage());
-                            }
-                            else {
+                            } else {
                                 return;
                             }
 
@@ -612,12 +606,8 @@ public class IndexBPlusMemory extends IndexBPlus {
                             n.setNextPage(null);
                             n.setLastPage(null);
 
-                            for (int i=0; i<n.getKeys().length; i++){
-                                prev.addKeys(n.getKeys()[i]);
-                            }
-
-                            for (int i=0; i<n.getPointers().length; i++) {
-                                prev.addPointers(n.getPointers()[i]);
+                            for (int i = 0; i < n.getKeys().length; i++) {
+                                prev.addKeys(store, n.getKeys()[i]);
                             }
 
                             if (prevB) {
@@ -642,173 +632,181 @@ public class IndexBPlusMemory extends IndexBPlus {
                                     }
                                 }
                             }
+                        }
 
-                            boolean finished = false;
-                            do {
-                                // if we get root
-                                if (stack.isEmpty()) {
+                        boolean finished = false;
+                        do {
+                            // if we get root
+                            if (stack.isEmpty()) {
 
-                                    root.removeKeys(tempKey);
-                                    root.removePointers(tempPointer);
+                                root.removeKeys(store, tempKey);
+                                root.removePointers(tempPointer);
+                                finished = true;
+
+                            }
+                            else {
+
+                                n = stack.pop();
+
+                                //try borrowing from the sibling
+                                if (n.getKeys().length >= 2) {
+
+                                    n.removeKeys(store, tempKey);
+                                    n.removePointers(tempPointer);
+
                                     finished = true;
 
-                                }
-                                else {
+                                } else {
+                                    // if the root has single sibling
+                                    // the tree height will decrease
 
-                                    n = stack.pop();
+                                    if (n == root) {
 
-                                    //try borrowing from the sibling
-                                    if (n.getKeys().length >= 2) {
-
-                                        n.removeKeys(tempKey);
+                                        n.removeKeys(store, tempKey);
                                         n.removePointers(tempPointer);
+
+                                        if (n.getPointers().length == 1) {
+                                            root = n.getPointers()[0];
+                                            store.setAccessor(this, root);
+                                        }
 
                                         finished = true;
 
                                     } else {
-                                        // if the root has single sibling
-                                        // the tree height will decrease
 
-                                        if (n == root) {
+                                        n.removeKeys(store, tempKey);
+                                        n.removePointers(tempPointer);
 
-                                            n.removeKeys(tempKey);
-                                            n.removePointers(tempPointer);
+                                        parent = stack.peek();
+                                        deter = sameParent2(n, parent);
 
-                                            if (n.getPointers().length == 1) {
-                                                root = n.getPointers()[0];
-                                                store.setAccessor(this, root);
+                                        // borrowing from next internal node
+
+                                        if (deter == 1) {
+
+                                            int index = -1;
+
+                                            for (int i = 0; i < parent.getPointers().length; i++) {
+                                                if (parent.getPointers()[i] == n.getNextPage()) {
+                                                    index = i;
+                                                    break;
+                                                }
                                             }
+
+                                            n.addKeys(store, parent.removeKeys(store, index - 1));
+                                            n.addPointers(n.getNextPage().removePointers(0));
+
+                                            NodeBPlus temp = n.getNextPage().removeKeys(store, 0);
+
+                                            parent.addKeys(store, temp, index-1);
 
                                             finished = true;
+                                        }
 
+                                        // boorwing form prev internal node
+                                        else if (deter == 2) {
+
+                                            int index = -1;
+
+                                            for (int i = 0; i < parent.getPointers().length; i++) {
+                                                if (parent.getPointers()[i] == n) {
+
+                                                    index = i;
+                                                    break;
+                                                }
+                                            }
+                                            n.addKeys(store, parent.removeKeys(store, index - 1), 0);
+                                            n.addPointers(n.getLastPage().removePointers(
+                                                    n.getLastPage().getPointers().length - 1),
+                                                    0);
+
+                                            parent.addKeys(store, n.getLastPage().removeKeys(
+                                                    store, n.getLastPage().getKeys().length - 1),
+                                                    index-1);
+
+                                            finished = true;
                                         } else {
 
-                                            n.removeKeys(tempKey);
-                                            n.removePointers(tempPointer);
-
-                                            parent = stack.peek();
-                                            deter = sameParent2(n, parent);
-
-                                            // borrowing from next internal node
-
-                                            if (deter == 1) {
-
-                                                int index = -1;
+                                            // merging two internal nodes
+                                            if (canMeargeNext(parent, n)) {
 
                                                 for (int i = 0; i < parent.getPointers().length; i++) {
-                                                    if (parent.getPointers()[i] == n.getNextPage()) {
-                                                        index = i;
+
+                                                    if (n == parent.getPointers()[i]) {
+                                                        tempKey = i;
+                                                        tempPointer = i;
                                                         break;
                                                     }
                                                 }
 
-                                                n.addKeys(parent.removeKeys(index - 1));
-                                                n.addPointers(n.getNextPage().removePointers(0));
+                                                NodeBPlus next = n.getNextPage();
 
-                                                parent.addKeys(n.getNextPage().removeKeys(0), index-1);
-
-                                                finished = true;
-                                            }
-
-                                            // boorwing form prev internal node
-                                            else if (deter == 2) {
-
-                                                int index = -1;
-
-                                                for (int i = 0; i < parent.getPointers().length; i++) {
-                                                    if (parent.getPointers()[i] == n) {
-
-                                                        index = i;
-                                                        break;
-                                                    }
+                                                if (n.getLastPage() != null) {
+                                                    n.getLastPage().setNextPage(next);
                                                 }
-                                                n.addKeys(parent.removeKeys(index - 1), 0);
-                                                n.addPointers(n.getLastPage().removePointers(
-                                                        n.getLastPage().getPointers().length - 1),
-                                                        0);
+                                                if (next != null) {
+                                                    next.setLastPage(n.getLastPage());
+                                                }
+                                                else {
+                                                    return;
+                                                }
 
-                                                parent.addKeys(n.getLastPage().removeKeys(
-                                                        n.getLastPage().getKeys().length - 1),
-                                                        index-1);
+                                                next.addKeys(store, parent.getKeys()[tempKey], 0);
 
-                                                finished = true;
+                                                for (int i=n.getKeys().length-1; i>=0; i--){
+                                                    next.addKeys(store, n.getKeys()[i], 0);
+                                                }
+
+                                                for (int i=n.getPointers().length-1; i>=0; i--){
+                                                    next.addPointers(n.getPointers()[i], 0);
+                                                }
+
+
+
                                             } else {
+                                                for (int i = 0; i < parent.getPointers().length; i++) {
 
-                                                // merging two internal nodes
-                                                if (canMeargeNext(parent, n)) {
+                                                    if (n == parent.getPointers()[i]) {
 
-                                                    for (int i = 0; i < parent.getPointers().length; i++) {
-
-                                                        if (n == parent.getPointers()[i]) {
-                                                            tempKey = i;
-                                                            tempPointer = i;
-                                                            break;
-                                                        }
+                                                        tempKey = i - 1;
+                                                        tempPointer = i;
+                                                        break;
                                                     }
-
-                                                    NodeBPlus next = n.getNextPage();
-
-                                                    if (n.getLastPage() != null) {
-                                                        n.getLastPage().setNextPage(next);
-                                                    }
-                                                    if (next != null) {
-                                                        next.setLastPage(n.getLastPage());
-                                                    }
-                                                    else {
-                                                        return;
-                                                    }
-
-                                                    next.addKeys(parent.getKeys()[tempKey], 0);
-
-                                                    for (int i=n.getKeys().length; i>=0; i--){
-                                                        next.addKeys(n.getKeys()[i], 0);
-                                                    }
-
-                                                    for (int i=n.getPointers().length; i>=0; i--){
-                                                        next.addPointers(n.getPointers()[i], 0);
-                                                    }
-
-
-
-                                                } else {
-                                                    for (int i = 0; i < parent.getPointers().length; i++) {
-
-                                                        if (n == parent.getPointers()[i]) {
-
-                                                            tempKey = i - 1;
-                                                            tempPointer = i;
-                                                            break;
-                                                        }
-                                                    }
-
-                                                    prev = n.getLastPage();
-                                                    if (prev != null) {
-                                                        prev.setNextPage(n.getNextPage());
-                                                    }
-
-                                                    if (n.getNextPage() != null) {
-                                                        n.getNextPage().setLastPage(prev);
-                                                    }
-
-                                                    prev.addKeys(parent.getKeys()[tempKey]);
-
-                                                    for (int i=0; i<n.getKeys().length; i++){
-                                                        prev.addKeys(n.getKeys()[i]);
-                                                    }
-
-                                                    for (int i=0; i<n.getPointers().length; i++) {
-                                                        prev.addPointers(n.getPointers()[i]);
-                                                    }
-
                                                 }
+
+                                                NodeBPlus prev = n.getLastPage();
+                                                if (prev != null) {
+                                                    prev.setNextPage(n.getNextPage());
+                                                }
+
+                                                if (n.getNextPage() != null) {
+                                                    n.getNextPage().setLastPage(prev);
+                                                }
+
+                                                prev.addKeys(store, parent.getKeys()[tempKey]);
+
+                                                for (int i=0; i<n.getKeys().length; i++){
+                                                    prev.addKeys(store, n.getKeys()[i]);
+                                                }
+
+                                                for (int i=0; i<n.getPointers().length; i++) {
+                                                    prev.addPointers(n.getPointers()[i]);
+                                                }
+
                                             }
                                         }
                                     }
                                 }
-                            } while (!finished);
-                        }
+                            }
+                        } while (!finished);
+
                     }
                 }
+            }
+
+            else {
+                System.out.print("not found!");
+
             }
 
 
